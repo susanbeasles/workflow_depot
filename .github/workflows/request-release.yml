@@ -1,0 +1,42 @@
+name: Request centralized source release
+on:
+  workflow_call:
+    secrets:
+      RELEASE_DISPATCH_TOKEN:
+        required: true
+permissions: {}
+jobs:
+  dispatch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch centralized release receiver
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_DISPATCH_TOKEN }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          SOURCE_REPOSITORY_ID: ${{ github.repository_id }}
+          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_RUN_ID: ${{ github.run_id }}
+          SOURCE_OWNER_ID: ${{ github.repository_owner_id }}
+          SOURCE_EVENT: ${{ github.event_name }}
+          SOURCE_REF: ${{ github.ref }}
+        run: |
+          node --input-type=module <<'JS'
+          if (process.env.SOURCE_EVENT !== 'push' || process.env.SOURCE_REF !== 'refs/heads/main' || process.env.SOURCE_OWNER_ID !== '215839550') throw Error('Only personal main push callers are accepted');
+          if (!/^susanbeasles\/[A-Za-z0-9_.-]+$/.test(process.env.SOURCE_REPOSITORY ?? '') || !/^[1-9][0-9]*$/.test(process.env.SOURCE_REPOSITORY_ID ?? '') || !/^[a-f0-9]{40}$/.test(process.env.SOURCE_SHA ?? '') || !/^[1-9][0-9]*$/.test(process.env.SOURCE_RUN_ID ?? '')) throw Error('Invalid source identity');
+          const token = process.env.GH_TOKEN;
+          if (!token) throw Error('Missing RELEASE_DISPATCH_TOKEN');
+          const body = { ref: 'main', inputs: {
+            repository: process.env.SOURCE_REPOSITORY,
+            repository_id: process.env.SOURCE_REPOSITORY_ID,
+            sha: process.env.SOURCE_SHA,
+            source_run_id: process.env.SOURCE_RUN_ID,
+          }};
+          const response = await fetch('https://api.github.com/repos/susanbeasles/delivery_control/actions/workflows/release.yml/dispatches', {
+            method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30000),
+            headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2026-03-10', 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          if (!response.ok) throw Error(`Release dispatch failed (${response.status}); rerun this source workflow`);
+          console.log('Release request accepted by delivery_control');
+          JS
