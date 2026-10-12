@@ -1,0 +1,22 @@
+{
+  "schema": "workflow-depot-scanner-tools/v1",
+  "platform": "linux-x86_64-python3.12",
+  "gitleaks": {
+    "version": "8.30.1",
+    "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz",
+    "archiveDigest": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
+    "executableDigest": "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509",
+    "rulesetDigest": "59b940ed5c389eecac2aa40c7c0076c09b54e027964cd26f2ccd47d74ab045c6"
+  },
+  "semgrep": {
+    "version": "1.180.0",
+    "wheelDigest": "16db2e2706ab814a975eeec25debfad49abba846b7c513d88e041447152f8447",
+    "requirementsDigest": "13a55f96be96a9660e1064230606ed192a9be73fb4844a3160e5e52e8be4652a",
+    "rulesetDigest": "0a8c27268be680c281b62b29698db834aef9b8f4a0dd907c66bcdb1eed41143e",
+    "executableDigest": "81d0c1f6f6584ab6f4633961e2abb561052d9a8ac3b15b8b420e1ff28e2c3504",
+    "runtimeDigest": "808906f202c996dc47e119754b3a2a2b91dd55d1e505e4d1190536ad55c8ede4",
+    "interpreterDigest": "fa67443527ed9647f760d807e2a38f26340757123e643c4639cf273ed15d5ea7",
+    "runtimePythonVersion": "3.12"
+  },
+  "installRoot": "/tmp/workflow-depot-scanners"
+}

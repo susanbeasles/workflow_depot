@@ -1,0 +1,18 @@
+{
+  "name": "workflow-depot-deployment-authority",
+  "main": "../src/deployment-authority-worker.mjs",
+  "compatibility_date": "2026-10-08",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [],
+  "vars": {
+    "ENABLED": "false",
+    "DEPLOYMENT_POLICY_JSON": "{\"schema\":\"workflow-depot-cloudflare-policy/v1\",\"revision\":1,\"enabled\":false,\"authorizer\":{},\"executor\":{},\"targets\":[],\"maxArtifactBytes\":5242880,\"verification\":{}}"
+  },
+  "durable_objects": {
+    "bindings": [{"name": "DEPLOYMENT_STATE", "class_name": "DeploymentAuthorityState"}]
+  },
+  "migrations": [{"tag": "v1", "new_sqlite_classes": ["DeploymentAuthorityState"]}],
+  "observability": {"enabled": true, "logs": {"enabled": true, "invocation_logs": false}},
+  "services": [{"binding":"DEPLOYMENT_EVIDENCE","service":"workflow-depot-deployment-evidence","entrypoint":"DeploymentEvidence"}]
+}

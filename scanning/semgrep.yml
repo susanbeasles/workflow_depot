@@ -1,0 +1,13 @@
+rules:
+  - id: depot.javascript.dynamic-eval
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Dynamic eval executes a string as code.
+    pattern: eval(...)
+  - id: depot.javascript.shell-exec
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Review shell command execution; use a safe argument-vector API.
+    pattern-either:
+      - pattern: require('child_process').exec(...)
+      - pattern: require('node:child_process').exec(...)

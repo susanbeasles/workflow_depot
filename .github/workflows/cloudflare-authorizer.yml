@@ -1,0 +1,33 @@
+name: Bound Cloudflare authorization caller
+on:
+  workflow_call:
+    inputs:
+      operation:
+        required: true
+        type: string
+      operation_digest:
+        required: true
+        type: string
+permissions: {}
+jobs:
+  authorize:
+    if: github.repository == 'susanbeasles/workflow_depot' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && github.workflow_ref == 'susanbeasles/workflow_depot/.github/workflows/authorize-cloudflare.yml@refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Submit exact operation to the retained authority
+        env:
+          CLOUDFLARE_OPERATION: ${{ inputs.operation }}
+          CLOUDFLARE_OPERATION_DIGEST: ${{ inputs.operation_digest }}
+        run: node scripts/request-cloudflare-authorization.mjs

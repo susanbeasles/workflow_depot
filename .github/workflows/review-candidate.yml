@@ -1,0 +1,70 @@
+name: Shared isolated candidate reviewer
+on:
+  workflow_call:
+    inputs:
+      candidate_sha:
+        required: true
+        type: string
+      scan_report_digest:
+        required: true
+        type: string
+      scan_artifact_id:
+        required: true
+        type: string
+    outputs:
+      receipt_digest:
+        value: ${{ jobs.review.outputs.receipt_digest }}
+      receipt:
+        value: ${{ jobs.review.outputs.receipt }}
+permissions: {}
+jobs:
+  review:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      id-token: write
+    outputs:
+      receipt_digest: ${{ steps.review.outputs.receipt_digest }}
+      receipt: ${{ steps.review.outputs.receipt }}
+    env:
+      # Source-owned commissioning pin; never an input or application variable.
+      REVIEWED_DEPOT_SHA: REVIEWED_DEPOT_SHA
+    steps:
+      - name: Validate immutable coordinates and trusted runtime pin
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          SCAN_REPORT_DIGEST: ${{ inputs.scan_report_digest }}
+          SCAN_ARTIFACT_ID: ${{ inputs.scan_artifact_id }}
+        run: |
+          node --input-type=module <<'JS'
+          const e=process.env;
+          if(!/^[a-f0-9]{40}$/.test(e.REVIEWED_DEPOT_SHA??'')||!/^[a-f0-9]{40}$/.test(e.CANDIDATE_SHA??'')||e.CANDIDATE_SHA!==e.GITHUB_SHA||e.GITHUB_EVENT_NAME!=='push'||!/^refs\/heads\/promotion\/[1-9][0-9]*\/shadow$/.test(e.GITHUB_REF??'')||!/^[a-f0-9]{64}$/.test(e.SCAN_REPORT_DIGEST??'')||!/^[1-9][0-9]*$/.test(e.SCAN_ARTIFACT_ID??'')||!Number.isSafeInteger(Number(e.SCAN_ARTIFACT_ID))) throw Error('Trusted reviewer coordinates or runtime unavailable');
+          JS
+      - name: Read only the trusted common reviewer runtime
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: susanbeasles/workflow_depot
+          ref: ${{ env.REVIEWED_DEPOT_SHA }}
+          path: trusted-reviewer
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
+        with:
+          node-version: '24'
+      - name: Read immutable scanner report data only
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3
+        with:
+          artifact-ids: ${{ inputs.scan_artifact_id }}
+          path: ${{ runner.temp }}/scan-evidence
+          merge-multiple: true
+      - name: Review exact signed candidate after independently verified gates
+        id: review
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          SCAN_REPORT_DIGEST: ${{ inputs.scan_report_digest }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node trusted-reviewer/src/candidate-review-cli.mjs

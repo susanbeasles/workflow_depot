@@ -1,0 +1,3 @@
+title = "Depot-pinned Gitleaks built-in rules"
+[extend]
+useDefault = true

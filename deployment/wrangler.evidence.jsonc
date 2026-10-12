@@ -1,0 +1,19 @@
+{
+  "name": "workflow-depot-deployment-evidence",
+  "main": "../src/deployment-evidence-worker.mjs",
+  "compatibility_date": "2026-10-08",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [],
+  "vars": {
+    "EVIDENCE_ENABLED": "false",
+    "DEPLOYMENT_POLICY_JSON": "{\"schema\":\"workflow-depot-cloudflare-policy/v1\",\"revision\":1,\"enabled\":false,\"authorizer\":{},\"executor\":{},\"targets\":[],\"maxArtifactBytes\":5242880,\"verification\":{}}"
+  },
+  "services": [
+    {"binding":"BUILD_PROVENANCE","service":"workflow-depot-build-provenance","entrypoint":"BuildProvenance"}
+  ],
+  "observability": {"enabled":false}
+  // SIGNING_RECEIPTS requires the reviewed isolated signer receipt service.
+  // No name is invented here. Its absence deliberately blocks activation.
+  // GITHUB_READ_TOKEN, if needed for private repositories, stays in this service.
+}

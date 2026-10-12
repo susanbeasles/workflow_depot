@@ -1,0 +1,26 @@
+# Install only after reviewing and replacing REVIEWED_DEPOT_SHA with a full
+# immutable commit SHA, and commissioning the required trusted components.
+# Install as .github/workflows/build.yml to match the deployment provenance
+# verifier's fixed caller-workflow identity. This does not stage artifacts yet.
+name: Candidate CI
+on:
+  push:
+    branches: ['promotion/*/shadow']
+permissions:
+  contents: read
+jobs:
+  candidate:
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      id-token: write
+    uses: susanbeasles/workflow_depot/.github/workflows/orchestration.yml@REVIEWED_DEPOT_SHA
+    with:
+      candidate_sha: ${{ github.sha }}
+      package_manager: npm
+      setup_script: setup:ci
+      environment_paths: '["node_modules"]'
+      unit_shards: 2
+      integration_shards: 2
+      e2e_shards: 2

@@ -23,7 +23,8 @@ jobs:
         run: |
           node --input-type=module <<'JS'
           if (process.env.SOURCE_EVENT !== 'push' || process.env.SOURCE_REF !== 'refs/heads/main' || process.env.SOURCE_OWNER_ID !== '215839550') throw Error('Only personal main push callers are accepted');
-          if (!/^susanbeasles\/[A-Za-z0-9_.-]+$/.test(process.env.SOURCE_REPOSITORY ?? '') || !/^[1-9][0-9]*$/.test(process.env.SOURCE_REPOSITORY_ID ?? '') || !/^[a-f0-9]{40}$/.test(process.env.SOURCE_SHA ?? '') || !/^[1-9][0-9]*$/.test(process.env.SOURCE_RUN_ID ?? '')) throw Error('Invalid source identity');
+          if (!/^susanbeasles\/[A-Za-z0-9_.-]+$/.test(process.env.SOURCE_REPOSITORY ?? '') || !/^[a-f0-9]{40}$/.test(process.env.SOURCE_SHA ?? '')) throw Error('Invalid source identity');
+          for (const id of [process.env.SOURCE_REPOSITORY_ID, process.env.SOURCE_RUN_ID]) if (!/^[1-9][0-9]*$/.test(id ?? '') || !Number.isSafeInteger(Number(id))) throw Error('Invalid numeric identity');
           const token = process.env.GH_TOKEN;
           if (!token) throw Error('Missing RELEASE_DISPATCH_TOKEN');
           const body = { ref: 'main', inputs: {

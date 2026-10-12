@@ -1,0 +1,11 @@
+{
+  "schema": "workflow-depot-scanner-policy/v1",
+  "qualified": false,
+  "supportedLanguages": ["javascript", "typescript"],
+  "supportedFrameworks": [],
+  "requiredCategories": ["dependency-integrity", "inventory", "vulnerability", "sast", "dast", "pentest", "malware", "quality", "sca", "secrets", "workflow-iac", "sbom", "iast", "fuzzing", "rasp", "owasp-asvs", "owasp-wstg", "provenance"],
+  "requiredTools": [],
+  "exemptions": [],
+  "sonarqubeStandardRulesetDigest": null,
+  "dependencyIntegrity": null
+}
