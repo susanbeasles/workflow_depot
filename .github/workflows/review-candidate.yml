@@ -41,7 +41,7 @@ jobs:
         run: |
           node --input-type=module <<'JS'
           const e=process.env;
-          if(!/^[a-f0-9]{40}$/.test(e.REVIEWED_DEPOT_SHA??'')||!/^[a-f0-9]{40}$/.test(e.CANDIDATE_SHA??'')||e.CANDIDATE_SHA!==e.GITHUB_SHA||e.GITHUB_EVENT_NAME!=='push'||!/^refs\/heads\/promotion\/[1-9][0-9]*\/shadow$/.test(e.GITHUB_REF??'')||!/^[a-f0-9]{64}$/.test(e.SCAN_REPORT_DIGEST??'')||!/^[1-9][0-9]*$/.test(e.SCAN_ARTIFACT_ID??'')||!Number.isSafeInteger(Number(e.SCAN_ARTIFACT_ID))) throw Error('Trusted reviewer coordinates or runtime unavailable');
+          if(!/^[a-f0-9]{40}$/.test(e.REVIEWED_DEPOT_SHA??'')||!/^[a-f0-9]{40}$/.test(e.CANDIDATE_SHA??'')||e.CANDIDATE_SHA!==e.GITHUB_SHA||e.GITHUB_EVENT_NAME!=='push'||!/^refs\/heads\/int\/[A-Za-z0-9_./-]+$/.test(e.GITHUB_REF??'')||!/^[a-f0-9]{64}$/.test(e.SCAN_REPORT_DIGEST??'')||!/^[1-9][0-9]*$/.test(e.SCAN_ARTIFACT_ID??'')||!Number.isSafeInteger(Number(e.SCAN_ARTIFACT_ID))) throw Error('Trusted reviewer coordinates or runtime unavailable');
           JS
       - name: Read only the trusted common reviewer runtime
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

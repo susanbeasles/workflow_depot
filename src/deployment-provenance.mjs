@@ -1,3 +1,4 @@
+import {integrationRef,isIntegrationRef} from './candidate-admission-client.mjs';
 import {digest,sha256,inspectArtifact,validatePolicy} from './shared/contract.mjs';
 import {verifyOIDC,githubJWKS} from './shared/oidc.mjs';
 import {validateCandidateReviewPolicy} from './candidate-admission-client.mjs';
@@ -12,7 +13,7 @@ function positive(value){return Number.isSafeInteger(value)&&value>0;}
 function validateSource(s){
  exact(s,['repository','repositoryID','commitSHA','sourceRef','runID','runAttempt']);
  requireThat(typeof s.repository==='string'&&/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(s.repository)&&[s.repositoryID,s.runID,s.runAttempt].every(positive)&&typeof s.commitSHA==='string'&&/^[a-f0-9]{40}$/.test(s.commitSHA),'invalid-artifact-source');
- const shadow=typeof s.sourceRef==='string'&&s.sourceRef.match(/^refs\/heads\/promotion\/([1-9][0-9]*)\/shadow$/);requireThat(shadow&&positive(Number(shadow[1])),'invalid-candidate-ref');return shadow;
+ requireThat(isIntegrationRef(s.sourceRef),'invalid-candidate-ref');return s.sourceRef;
 }
 async function currentPolicy(policy,options){const p=snapshot(policy(),65536);validatePolicy(p,options);requireThat(p.enabled&&/^[^/]+\/workflow_depot$/.test(p.authorizer.repository),'staging-disabled');return p;}
 function validIdentity(identity,s,now){requireThat(typeof identity?.jti==='string'&&/^[\x21-\x7e]{8,200}$/.test(identity.jti)&&positive(identity.expiresAt)&&identity.expiresAt>now()&&identity.runID===String(s.runID)&&identity.runAttempt===String(s.runAttempt),'invalid-builder-identity');}
@@ -20,7 +21,7 @@ async function readCandidateEvidence(s,p,github,candidates){
  const shadow=validateSource(s);
     const [repo,tip,main,commit,candidate]=await Promise.all([github.read(s.repository,''),github.read(s.repository,'/git/ref/'+s.sourceRef.slice(5)),github.read(s.repository,'/git/ref/heads/main'),github.read(s.repository,'/git/commits/'+s.commitSHA),candidates.lookupCandidate({repositoryID:s.repositoryID,commitSHA:s.commitSHA,shadowRef:s.sourceRef})]);
     exact(candidate,['schema','verified','repository','repositoryID','commitSHA','treeSHA','sourceRef','sourceSHA','expectedMainParent','shadowRef','sourcePR','sequence','signerKeyID','unsignedCommitDigest','artifactIntentDigest','policyDigest','sourceHistoryDigest']);
-    requireThat(candidate.schema==='repoctl-source-candidate/v1'&&candidate.verified===true&&candidate.repository===s.repository&&candidate.repositoryID===s.repositoryID&&candidate.commitSHA===s.commitSHA&&candidate.shadowRef===s.sourceRef&&candidate.sequence===Number(shadow[1])&&p.verification.signerKeyIDs.includes(candidate.signerKeyID),'candidate-evidence-denied');
+    requireThat(candidate.schema==='repoctl-source-candidate/v1'&&candidate.verified===true&&candidate.repository===s.repository&&candidate.repositoryID===s.repositoryID&&candidate.commitSHA===s.commitSHA&&candidate.shadowRef===s.sourceRef&&positive(candidate.sequence)&&integrationRef(candidate.sourceRef)===s.sourceRef&&p.verification.signerKeyIDs.includes(candidate.signerKeyID),'candidate-evidence-denied');
     requireThat([candidate.sourceSHA,candidate.expectedMainParent,candidate.treeSHA].every(v=>typeof v==='string'&&/^[a-f0-9]{40}$/.test(v))&&[candidate.unsignedCommitDigest,candidate.artifactIntentDigest,candidate.policyDigest,candidate.sourceHistoryDigest].every(v=>typeof v==='string'&&HEX.test(v)),'candidate-evidence-denied');
     exact(candidate.sourcePR,['number','repositoryID','headSHA']);requireThat(positive(candidate.sourcePR.number)&&candidate.sourcePR.repositoryID===s.repositoryID&&candidate.sourcePR.headSHA===candidate.sourceSHA,'candidate-evidence-denied');
     requireThat(repo.id===s.repositoryID&&repo.full_name===s.repository&&repo.owner?.id===p.authorizer.ownerID&&!repo.archived&&!repo.fork&&repo.default_branch==='main'&&tip.object?.sha===s.commitSHA&&main.object?.sha===candidate.expectedMainParent&&commit.sha===s.commitSHA&&commit.parents?.length===1&&commit.parents[0].sha===candidate.expectedMainParent&&commit.tree?.sha===candidate.treeSHA&&commit.verification?.verified===true&&commit.verification.reason==='valid','source-evidence-denied');
@@ -42,7 +43,7 @@ export function createCandidateAdmission({policy,github,candidates,verifyIdentit
    const binding={operationID:await digest(s),runID:s.runID,runAttempt:s.runAttempt},keys=await jwks();let identity;
    // Both choices are source-owned, exact immutable reusable workflows. JWT
    // claims never select a key URL, trust policy, workflow, or caller identity.
-   for(const jobWorkflowRef of [trust.jobWorkflowRef,base+'review-candidate.yml@'+sha]){
+   for(const jobWorkflowRef of [trust.jobWorkflowRef,base+'review-candidate.yml@'+sha,base+'admit-integration.yml@'+sha]){
     try{identity=await verifyIdentity(input.oidcToken,{...trust,jobWorkflowRef},binding,keys,now());break;}catch{}
    }
    validIdentity(identity,s,now);

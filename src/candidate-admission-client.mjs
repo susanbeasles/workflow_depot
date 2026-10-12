@@ -1,3 +1,18 @@
+// Ref names are validated before they reach Git or provider URLs.
+export function validHeadRef(value) {
+ if(typeof value!=='string'||!value.startsWith('refs/heads/')||value.length>240)return false;
+ const name=value.slice(11);
+ return /^[A-Za-z0-9_./-]+$/.test(name)&&!!name&&!/[\x00-\x20\x7f~^:?*\[\\]/.test(name)&&!name.includes('..')&&!name.includes('@{')&&!name.endsWith('.')&&name.split('/').every(part=>part&&!part.startsWith('.')&&!part.endsWith('.lock'));
+}
+export function integrationRef(sourceRef) {
+ if(!validHeadRef(sourceRef)||sourceRef==='refs/heads/main'||sourceRef.startsWith('refs/heads/int/'))throw Error('Invalid integration source ref');
+ return 'refs/heads/int/'+sourceRef.slice(11);
+}
+export function isIntegrationRef(value) {
+ if(typeof value!=='string'||!value.startsWith('refs/heads/int/'))return false;
+ try{return integrationRef('refs/heads/'+value.slice(15))===value;}catch{return false;}
+}
+
 // Commission only through reviewed workflow_depot source, never an app input,
 // repository variable, environment override, or token-selected destination.
 export const CANDIDATE_ADMISSION_ORIGIN = '';
@@ -46,7 +61,7 @@ export async function verifySourceCandidate(source,{fetcher=fetch,env=process.en
   const hash=async value=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(canonical(value)))),v=>v.toString(16).padStart(2,'0')).join('');
   exact(source,['repository','repositoryID','commitSHA','sourceRef','runID','runAttempt']);
   require(typeof source.repository==='string'&&source.repository.length<=201&&/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(source.repository)&&[source.repositoryID,source.runID,source.runAttempt].every(positive)&&typeof source.commitSHA==='string'&&/^[a-f0-9]{40}$/.test(source.commitSHA));
-  const shadow=typeof source.sourceRef==='string'&&source.sourceRef.match(/^refs\/heads\/promotion\/([1-9][0-9]*)\/shadow$/);require(shadow&&positive(Number(shadow[1])));
+  require(isIntegrationRef(source.sourceRef));
   source=JSON.parse(canonical(source));
   const origin=new URL(CANDIDATE_ADMISSION_ORIGIN);
   require(origin.protocol==='https:'&&origin.origin===CANDIDATE_ADMISSION_ORIGIN&&!origin.username&&!origin.password&&!origin.port&&/(?:^|\.)(?:vespoli\.me|anthonyvespoli\.com)$/.test(origin.hostname));
@@ -66,7 +81,7 @@ export async function verifySourceCandidate(source,{fetcher=fetch,env=process.en
   require(result.verified===true&&canonical(result.source)===canonical(source)&&typeof result.candidateDigest==='string'&&/^[a-f0-9]{64}$/.test(result.candidateDigest));
   const c=result.candidate;
   exact(c,['schema','verified','repository','repositoryID','commitSHA','treeSHA','sourceRef','sourceSHA','expectedMainParent','shadowRef','sourcePR','sequence','signerKeyID','unsignedCommitDigest','artifactIntentDigest','policyDigest','sourceHistoryDigest']);
-  require(c.schema==='repoctl-source-candidate/v1'&&c.verified===true&&c.repository===source.repository&&c.repositoryID===source.repositoryID&&c.commitSHA===source.commitSHA&&c.shadowRef===source.sourceRef&&c.sequence===Number(shadow[1])&&await hash(c)===result.candidateDigest);
+  require(c.schema==='repoctl-source-candidate/v1'&&c.verified===true&&c.repository===source.repository&&c.repositoryID===source.repositoryID&&c.commitSHA===source.commitSHA&&c.shadowRef===source.sourceRef&&positive(c.sequence)&&integrationRef(c.sourceRef)===source.sourceRef&&await hash(c)===result.candidateDigest);
   validateCandidateReviewPolicy(result.reviewPolicy,source,c);
   return result;
  }catch{throw Error('Candidate admission failed');}

@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import {digest} from '../src/shared/contract.mjs';
 
 const path=new URL('../src/candidate-admission-client.mjs',import.meta.url);
-const source={repository:'susanbeasles/source',repositoryID:2,commitSHA:'f'.repeat(40),sourceRef:'refs/heads/promotion/1/shadow',runID:50,runAttempt:1};
+const source={repository:'susanbeasles/source',repositoryID:2,commitSHA:'f'.repeat(40),sourceRef:'refs/heads/int/feature',runID:50,runAttempt:1};
 const env={ACTIONS_ID_TOKEN_REQUEST_URL:'https://pipelines.actions.githubusercontent.com/synthetic/idtoken?api-version=2.0',ACTIONS_ID_TOKEN_REQUEST_TOKEN:'synthetic-request-token'};
 async function client(configured=true){let code=await readFile(path,'utf8');if(configured)code=code.replace("CANDIDATE_ADMISSION_ORIGIN = ''","CANDIDATE_ADMISSION_ORIGIN = 'https://build.vespoli.me'");return import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));}
 async function proof(){const candidate={schema:'repoctl-source-candidate/v1',verified:true,repository:source.repository,repositoryID:source.repositoryID,commitSHA:source.commitSHA,shadowRef:source.sourceRef,treeSHA:'c'.repeat(40),sourceRef:'refs/heads/feature',sourceSHA:'a'.repeat(40),expectedMainParent:'b'.repeat(40),sourcePR:{number:3,repositoryID:source.repositoryID,headSHA:'a'.repeat(40)},sequence:1,signerKeyID:'d'.repeat(64),unsignedCommitDigest:'1'.repeat(64),artifactIntentDigest:'2'.repeat(64),policyDigest:'3'.repeat(64),sourceHistoryDigest:'4'.repeat(64)};return {verified:true,source,candidateDigest:await digest(candidate),candidate,reviewPolicy:null};}

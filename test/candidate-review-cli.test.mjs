@@ -10,8 +10,8 @@ import {canonical,hash,engineeringGuide} from '../src/candidate-review.mjs';
 import {mandatoryCategories} from '../src/scan-report.mjs';
 const sha=c=>c.repeat(40),hex=c=>c.repeat(64);
 function fixture(){
- const source={repository:'susanbeasles/app',repositoryID:1,ownerID:215839550,commitSHA:sha('a'),sourceRef:'refs/heads/promotion/1/shadow',runID:3,runAttempt:1};
- const candidate={schema:'repoctl-source-candidate/v1',verified:true,repository:source.repository,repositoryID:1,commitSHA:sha('a'),treeSHA:sha('b'),sourceSHA:sha('c'),expectedMainParent:sha('d'),shadowRef:source.sourceRef,sourcePR:{number:2,repositoryID:1,headSHA:sha('c')},policyDigest:hex('e')};
+ const source={repository:'susanbeasles/app',repositoryID:1,ownerID:215839550,commitSHA:sha('a'),sourceRef:'refs/heads/int/feature',runID:3,runAttempt:1};
+ const candidate={schema:'repoctl-source-candidate/v1',verified:true,repository:source.repository,repositoryID:1,commitSHA:sha('a'),treeSHA:sha('b'),sourceSHA:sha('c'),expectedMainParent:sha('d'),shadowRef:source.sourceRef,sourceRef:'refs/heads/feature',sourcePR:{number:2,repositoryID:1,headSHA:sha('c')},policyDigest:hex('e')};
  const docs=[{kind:'language',name:'javascript',revision:sha('f'),text:'Synthetic JavaScript policy.'},{kind:'dependencies',name:'dependencies',revision:sha('f'),text:'Synthetic dependency policy.'}].map(d=>({...d,digest:hash(d.text)}));
  const workflow='synthetic trusted thin caller';
  const tools=mandatoryCategories.map((category,i)=>({id:category==='quality'?'sonarqube':'fixture-'+i,category,version:'synthetic-1',rulesetDigest:hex('7'),databaseMaxAgeSeconds:0}));
@@ -55,7 +55,7 @@ test('scanner data reader rejects symlinks, extra files and oversized files',asy
 });
 test('actual workflow validates before checkout and only downloads scanner report data',async()=>{
  const yaml=await readFile(new URL('../.github/workflows/review-candidate.yml',import.meta.url),'utf8');const script=/node --input-type=module <<'JS'\n([\s\S]*?)\n          JS/.exec(yaml)[1];
- const env={REVIEWED_DEPOT_SHA:sha('f'),CANDIDATE_SHA:sha('a'),GITHUB_SHA:sha('a'),GITHUB_EVENT_NAME:'push',GITHUB_REF:'refs/heads/promotion/1/shadow',SCAN_REPORT_DIGEST:hex('e'),SCAN_ARTIFACT_ID:'1'};
+ const env={REVIEWED_DEPOT_SHA:sha('f'),CANDIDATE_SHA:sha('a'),GITHUB_SHA:sha('a'),GITHUB_EVENT_NAME:'push',GITHUB_REF:'refs/heads/int/feature',SCAN_REPORT_DIGEST:hex('e'),SCAN_ARTIFACT_ID:'1'};
  vm.runInNewContext(script,{process:{env}},{timeout:1000});for(const bad of [{REVIEWED_DEPOT_SHA:'REVIEWED_DEPOT_SHA'},{CANDIDATE_SHA:'main'},{SCAN_ARTIFACT_ID:'1,2'},{GITHUB_REF:'refs/heads/main'}])assert.throws(()=>vm.runInNewContext(script,{process:{env:{...env,...bad}}},{timeout:1000}));
  assert.equal((yaml.match(/uses: actions\/checkout@/g)??[]).length,1);assert.match(yaml,/repository: susanbeasles\/workflow_depot/);assert.doesNotMatch(yaml,/npm |yarn |environment_paths|ci-env-|secrets: inherit/);
 });

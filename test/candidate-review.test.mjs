@@ -5,8 +5,8 @@ import {createCandidateReview,engineeringGuide,canonical,hash} from '../src/cand
 
 const sha=c=>c.repeat(40),hex=c=>c.repeat(64);
 function fixture(){
- const source={repository:'susanbeasles/app',repositoryID:1,ownerID:215839550,commitSHA:sha('a'),sourceRef:'refs/heads/promotion/1/shadow',runID:3,runAttempt:1};
- const candidate={schema:'repoctl-source-candidate/v1',verified:true,repository:source.repository,repositoryID:1,commitSHA:source.commitSHA,treeSHA:sha('b'),sourceSHA:sha('c'),expectedMainParent:sha('d'),shadowRef:source.sourceRef,sourcePR:{number:2,repositoryID:1,headSHA:sha('c')},policyDigest:hex('e')};
+ const source={repository:'susanbeasles/app',repositoryID:1,ownerID:215839550,commitSHA:sha('a'),sourceRef:'refs/heads/int/feature',runID:3,runAttempt:1};
+ const candidate={schema:'repoctl-source-candidate/v1',verified:true,repository:source.repository,repositoryID:1,commitSHA:source.commitSHA,treeSHA:sha('b'),sourceSHA:sha('c'),expectedMainParent:sha('d'),shadowRef:source.sourceRef,sourceRef:'refs/heads/feature',sourcePR:{number:2,repositoryID:1,headSHA:sha('c')},policyDigest:hex('e')};
  const reviewPolicy={styleGuideDigest:engineeringGuide.digest,styleGuideRevision:engineeringGuide.revision,styleGuidePath:engineeringGuide.path,reviewerAppID:11,reviewerInstallationID:12,reviewerActorID:13,privilegedAppIDs:[21],privilegedActorIDs:[22],allowBotApproval:true,requiresHumanReview:false};
  const documents=[{kind:'language',name:'javascript',revision:sha('f'),text:'Synthetic JavaScript policy; runtime checks required.'},{kind:'dependencies',name:'dependencies',revision:sha('f'),text:'Synthetic dependencies policy; pin exact hashes.'}].map(d=>({...d,digest:hash(d.text)}));
  const policy={repository:source.repository,repositoryID:1,ownerID:source.ownerID,policyDigest:hex('e'),reviewPolicy,runtime:{repository:'susanbeasles/workflow_depot',revision:sha('f')},applicablePolicy:{languages:['javascript'],frameworks:[],dependencyPolicyDigest:documents[1].digest,documents,rules:['no-merge-conflicts','no-control-characters']},maxAgeSeconds:300};

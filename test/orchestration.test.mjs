@@ -14,7 +14,7 @@ function script(name) {
 }
 async function run(name, overrides={}, files={}, calls=[]) {
   const outputs=[];
-  const env={SOURCE_EVENT:'push',SOURCE_REF:'refs/heads/promotion/123/shadow',SOURCE_SHA:'a'.repeat(40),CANDIDATE_SHA:'a'.repeat(40),SOURCE_REPOSITORY:'susanbeasles/app',SOURCE_OWNER_ID:'215839550',PACKAGE_MANAGER:'npm',SETUP_SCRIPT:'setup:ci',ENVIRONMENT_PATHS:'["node_modules"]',UNIT_SHARDS:'2',INTEGRATION_SHARDS:'1',E2E_SHARDS:'2',GITHUB_OUTPUT:'synthetic-output',CHECK:'unit',SHARD:'1',SHARDS:'2',...overrides};
+  const env={SOURCE_EVENT:'push',SOURCE_REF:'refs/heads/int/feature',SOURCE_SHA:'a'.repeat(40),CANDIDATE_SHA:'a'.repeat(40),SOURCE_REPOSITORY:'susanbeasles/app',SOURCE_OWNER_ID:'215839550',PACKAGE_MANAGER:'npm',SETUP_SCRIPT:'setup:ci',ENVIRONMENT_PATHS:'["node_modules"]',UNIT_SHARDS:'2',INTEGRATION_SHARDS:'1',E2E_SHARDS:'2',GITHUB_OUTPUT:'synthetic-output',CHECK:'unit',SHARD:'1',SHARDS:'2',...overrides};
   const modules={'node:path':{resolve,sep},'node:crypto':{createHash},'node:fs':{realpathSync:p=>files['realpath:'+p]??p,lstatSync:p=>({isDirectory:()=>files['directory:'+p]!==false}),appendFileSync:(p,s)=>outputs.push(s),readFileSync:p=>files[p]??JSON.stringify({scripts:{'setup:ci':'setup','test:ci':'test',lint:'lint',tsc:'tsc',build:'build'}})},'node:child_process':{execFileSync:(command,args,options)=>{calls.push({command,args,options});return '';}}};
   await vm.runInNewContext(`(async()=>{${script(name)}\n})()`,{process:{env},modules,console:{log(){}}},{timeout:1000});
   return {calls,outputs};
@@ -52,14 +52,14 @@ test('archive reads only declared repo-owned directories and records actual byte
 });
 test('shadow sequence is a positive canonical safe integer matching source authority',async()=>{
   for(const sequence of ['abc','0','01','-1','9007199254740992']) await assert.rejects(run('validate',{SOURCE_REF:`refs/heads/promotion/${sequence}/shadow`}));
-  await run('validate',{SOURCE_REF:'refs/heads/promotion/9007199254740991/shadow'});
+  await run('validate',{SOURCE_REF:'refs/heads/int/feature'});
 });
 test('all checks reuse the exact Node version selected by setup',()=>{
   assert.match(workflow,/node_version: \$\{\{ steps.node.outputs.node-version \}\}/);
   assert.match(workflow,/node-version: \$\{\{ needs.setup.outputs.node_version \}\}/);
 });
 test('rejects other refs/events/SHA, unsafe environment paths and unsupported package managers',async()=>{
-  for(const bad of [{SOURCE_EVENT:'pull_request'},{SOURCE_REF:'refs/heads/main'},{SOURCE_REF:'refs/tags/promotion/1/shadow'},{CANDIDATE_SHA:'b'.repeat(40)},{CANDIDATE_SHA:'main'},{SOURCE_OWNER_ID:'1'},{SOURCE_REPOSITORY:'other/app'},{PACKAGE_MANAGER:'pnpm'},{ENVIRONMENT_PATHS:'["../private"]'},{ENVIRONMENT_PATHS:'["."]'},{ENVIRONMENT_PATHS:'[".git"]'},{ENVIRONMENT_PATHS:'["/tmp"]'},{UNIT_SHARDS:'0'},{E2E_SHARDS:'17'}]) await assert.rejects(run('validate',bad));
+  for(const bad of [{SOURCE_EVENT:'pull_request'},{SOURCE_REF:'refs/heads/main'},{SOURCE_REF:'refs/tags/int/feature'},{CANDIDATE_SHA:'b'.repeat(40)},{CANDIDATE_SHA:'main'},{SOURCE_OWNER_ID:'1'},{SOURCE_REPOSITORY:'other/app'},{PACKAGE_MANAGER:'pnpm'},{ENVIRONMENT_PATHS:'["../private"]'},{ENVIRONMENT_PATHS:'["."]'},{ENVIRONMENT_PATHS:'[".git"]'},{ENVIRONMENT_PATHS:'["/tmp"]'},{UNIT_SHARDS:'0'},{E2E_SHARDS:'17'}]) await assert.rejects(run('validate',bad));
 });
 test('npm and yarn use their actual argument forwarding syntax for every test suite',async()=>{
   for(const manager of ['npm','yarn']) for(const check of ['unit','integration','e2e']) {

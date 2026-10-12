@@ -234,3 +234,13 @@ events and append-only main (5), and cross-component verification (6). The five
 review-focus cases each have explicit assertions above. Main protection and
 signer commissioning remain release prerequisites; no task silently bypasses
 them or substitutes a local signing key.
+
+## Execution status
+
+The six source implementation areas are present and the local suite results are
+recorded in [verification](../fixed-integration-verification.md). The original
+checklist is retained as a detailed qualification checklist: its broader live
+provider audit and exhaustive crash/recovery assertions are not all certified
+by these local tests. Cross-component coverage lives in repoctl's
+`controller/test/source-signing.test.mjs`, alongside separate real-Git transport
+tests. No activation or live integration PR is claimed.

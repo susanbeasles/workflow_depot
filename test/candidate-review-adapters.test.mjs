@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {createGitHubSourceReader,createReviewerIdentity,createOpenAIReviewer} from '../src/candidate-review-adapters.mjs';
 import {canonical,hash} from '../src/candidate-review.mjs';
 const sha=c=>c.repeat(40),hex=c=>c.repeat(64);
-const source={repository:'susanbeasles/app',repositoryID:1,ownerID:215839550,commitSHA:sha('a'),sourceRef:'refs/heads/promotion/1/shadow',runID:3,runAttempt:1};
+const source={repository:'susanbeasles/app',repositoryID:1,ownerID:215839550,commitSHA:sha('a'),sourceRef:'refs/heads/int/feature',runID:3,runAttempt:1};
 const candidate={treeSHA:sha('b'),expectedMainParent:sha('d'),policyDigest:hex('e')};
 const response=value=>new Response(JSON.stringify(value),{status:200,headers:{'content-type':'application/json'}});
 test('source reader uses only fixed-origin GETs and exact raw commit Contents; verifies blob bytes',async()=>{

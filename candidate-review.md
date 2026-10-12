@@ -20,7 +20,7 @@ parsed data; it is never imported or executed. Passing GitHub job metadata has a
 `scanReceiptDigest`.
 
 The existing candidate authority independently verifies the current signed S,
-original source P, main parent M and immutable shadow reference. Its private
+original source P, main parent M and the current generation at the fixed integration reference. Its private
 `lookupReviewPolicy({repositoryID,commitSHA,shadowRef})` capability returns the
 retained, accepted candidate review configuration. A missing configuration is
 explicitly null; invalid configuration or source drift fails. The API response

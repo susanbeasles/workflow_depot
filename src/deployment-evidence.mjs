@@ -1,3 +1,4 @@
+import {integrationRef,isIntegrationRef} from './candidate-admission-client.mjs';
 import {digest} from './shared/contract.mjs';
 const hash=/^[a-f0-9]{64}$/,sha=/^[a-f0-9]{40}$/;
 const deny=()=>{throw Error('Deployment evidence denied');};
@@ -26,7 +27,7 @@ export function deploymentEvidence({policy,github,signingReceipts,provenance}){
    // lookupReceipt must independently verify the retained owner approval and
    // both Git signatures/cross-links. GitHub's generic verified flag cannot
    // establish which enrolled signer or owner authorized this promotion.
-   require(receipt.shadowRef===`refs/heads/promotion/${receipt.sequence}/shadow`);
+   require(receipt.shadowRef===integrationRef(receipt.sourceRef));
    require(run.id===s.ciRunID&&run.run_attempt===s.ciRunAttempt&&run.head_sha===s.commitSHA&&run.head_branch===receipt.shadowRef.slice('refs/heads/'.length)&&run.event==='push'&&run.status==='completed'&&run.conclusion==='success'&&run.repository?.id===s.repositoryID&&run.repository.full_name===s.repository);
    require(run.referenced_workflows?.some(w=>w.path===v.ciWorkflowRef&&w.sha===v.ciWorkflowSHA));
    const jobs=[];let total;
@@ -62,7 +63,7 @@ export function githubEvidenceReader({fetcher=fetch,token}={}){
   const text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);return raw?text:JSON.parse(text);
  }
  return {async read(repository,path){
-  if(!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)||!(path===''||/^\/(?:git\/ref\/heads\/(?:main|promotion\/[1-9][0-9]*\/shadow)|git\/commits\/[a-f0-9]{40}|actions\/runs\/[1-9][0-9]*(?:\/attempts\/[1-9][0-9]*\/jobs\?per_page=100&page=[1-9][0-9]*)?)$/.test(path)))deny();
+  if(!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)||!(path===''||/^\/(?:git\/ref\/heads\/(?:main|int\/[A-Za-z0-9_./-]+)|git\/commits\/[a-f0-9]{40}|actions\/runs\/[1-9][0-9]*(?:\/attempts\/[1-9][0-9]*\/jobs\?per_page=100&page=[1-9][0-9]*)?)$/.test(path)))deny();
   return request(repository,path);
  },async readWorkflow(repository,commitSHA){
   if(!sha.test(commitSHA))deny();

@@ -1,3 +1,4 @@
+import {integrationRef,isIntegrationRef} from './candidate-admission-client.mjs';
 import {canonical,digest,sha256} from './shared/contract.mjs';
 
 const hash=/^[a-f0-9]{64}$/,sha=/^[a-f0-9]{40}$/;
@@ -13,8 +14,8 @@ export async function verifyPriorJobs({github,source,candidate,trusted,now=()=>M
   const s=structuredClone(source),c=structuredClone(candidate),p=structuredClone(trusted);
   requireValue(typeof github?.read==='function'&&typeof github?.readWorkflow==='function'&&typeof now==='function');
   requireValue(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(s.repository)&&[s.repositoryID,s.ownerID,s.runID,s.runAttempt].every(positive)&&sha.test(s.commitSHA));
-  const match=/^refs\/heads\/promotion\/([1-9][0-9]*)\/shadow$/.exec(s.sourceRef);requireValue(match&&positive(Number(match[1])));
-  requireValue(c.schema==='repoctl-source-candidate/v1'&&c.verified===true&&c.repository===s.repository&&c.repositoryID===s.repositoryID&&c.commitSHA===s.commitSHA&&c.shadowRef===s.sourceRef&&[c.sourceSHA,c.expectedMainParent,c.treeSHA].every(x=>sha.test(x))&&positive(c.sourcePR?.number)&&c.sourcePR.repositoryID===s.repositoryID&&c.sourcePR.headSHA===c.sourceSHA&&hash.test(c.policyDigest)&&c.policyDigest===p.policyDigest);
+  requireValue(isIntegrationRef(s.sourceRef));
+  requireValue(c.schema==='repoctl-source-candidate/v1'&&c.verified===true&&c.repository===s.repository&&c.repositoryID===s.repositoryID&&c.commitSHA===s.commitSHA&&c.shadowRef===s.sourceRef&&integrationRef(c.sourceRef)===s.sourceRef&&[c.sourceSHA,c.expectedMainParent,c.treeSHA].every(x=>sha.test(x))&&positive(c.sourcePR?.number)&&c.sourcePR.repositoryID===s.repositoryID&&c.sourcePR.headSHA===c.sourceSHA&&hash.test(c.policyDigest)&&c.policyDigest===p.policyDigest);
   requireValue(positive(p.workflowID)&&p.workflowPath==='.github/workflows/build.yml'&&hash.test(p.workflowDigest)&&sha.test(p.jobWorkflowSHA)&&p.jobWorkflowRef===s.repository.split('/')[0]+'/workflow_depot/.github/workflows/orchestration.yml@'+p.jobWorkflowSHA&&Array.isArray(p.actorIDs)&&p.actorIDs.length>0&&p.actorIDs.every(positive)&&uniqueNames(p.requiredJobNames)&&p.requiredJobNames.includes(p.scanJobName)&&positive(p.maxAgeSeconds)&&p.maxAgeSeconds<=86400);
   const read=path=>github.read(s.repository,path);
   const checkRun=run=>{

@@ -1,3 +1,4 @@
+import {integrationRef,isIntegrationRef} from './candidate-admission-client.mjs';
 import {createHash} from 'node:crypto';
 import {canonical} from './shared/contract.mjs';
 export {canonical};
@@ -31,7 +32,7 @@ Model domain concepts and invariants before framework plumbing. Give values and 
 
 export function validateReviewSource(s){
  requireValue(exact(s,['repository','repositoryID','ownerID','commitSHA','sourceRef','runID','runAttempt'])&&/^susanbeasles\/[A-Za-z0-9_.-]+$/.test(s.repository)&&[s.repositoryID,s.ownerID,s.runID,s.runAttempt].every(positive)&&s.ownerID===215839550&&sha.test(s.commitSHA));
- const m=/^refs\/heads\/promotion\/([1-9][0-9]*)\/shadow$/.exec(s.sourceRef);requireValue(m&&positive(Number(m[1])));return s;
+ requireValue(isIntegrationRef(s.sourceRef));return s;
 }
 function validatePolicy(p,s){
  requireValue(p&&p.repository===s.repository&&p.repositoryID===s.repositoryID&&p.ownerID===s.ownerID&&hex.test(p.policyDigest)&&positive(p.maxAgeSeconds)&&p.maxAgeSeconds<=3600,'REVIEW_POLICY_UNAVAILABLE');
@@ -69,7 +70,7 @@ export function createCandidateReview({policy,candidates,priorEvidence,scans,sou
   const p=structuredClone(await policy.current(s));validatePolicy(p,s);
   const bytes=request.scanReportBytes;requireValue(bytes instanceof Uint8Array&&bytes.length>0&&bytes.length<=32*1024*1024&&hex.test(request.scanReportDigest)&&hash(bytes)===request.scanReportDigest,'REVIEW_REPORT_DIGEST');
   let report;try{const text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);report=JSON.parse(text);requireValue(text===canonical(report)||text===canonical(report)+'\n');}catch{throw Error('REVIEW_REPORT_ENCODING');}
-  async function candidateProof(){const proof=await candidates.verify(s);requireValue(proof?.verified===true&&proof.candidateDigest===hash(canonical(proof.candidate)));const c=structuredClone(proof.candidate);requireValue(c.schema==='repoctl-source-candidate/v1'&&c.verified===true&&c.repository===s.repository&&c.repositoryID===s.repositoryID&&c.commitSHA===s.commitSHA&&c.shadowRef===s.sourceRef&&[c.treeSHA,c.sourceSHA,c.expectedMainParent].every(x=>sha.test(x))&&c.sourcePR?.repositoryID===s.repositoryID&&c.sourcePR.headSHA===c.sourceSHA&&positive(c.sourcePR.number)&&c.policyDigest===p.policyDigest);return c;}
+  async function candidateProof(){const proof=await candidates.verify(s);requireValue(proof?.verified===true&&proof.candidateDigest===hash(canonical(proof.candidate)));const c=structuredClone(proof.candidate);requireValue(c.schema==='repoctl-source-candidate/v1'&&c.verified===true&&c.repository===s.repository&&c.repositoryID===s.repositoryID&&c.commitSHA===s.commitSHA&&c.shadowRef===s.sourceRef&&integrationRef(c.sourceRef)===s.sourceRef&&[c.treeSHA,c.sourceSHA,c.expectedMainParent].every(x=>sha.test(x))&&c.sourcePR?.repositoryID===s.repositoryID&&c.sourcePR.headSHA===c.sourceSHA&&positive(c.sourcePR.number)&&c.policyDigest===p.policyDigest);return c;}
   const candidate=await candidateProof();
   const expected={repositoryID:s.repositoryID,commitSHA:s.commitSHA,treeSHA:candidate.treeSHA,sourceSHA:candidate.sourceSHA,baseSHA:candidate.expectedMainParent,sourcePRNumber:candidate.sourcePR.number,policyDigest:candidate.policyDigest};
   const prior=await priorEvidence.verify({source:s,candidate,policy:p});requireValue(prior?.verified===true&&Object.entries(expected).every(([k,v])=>prior[k]===v)&&[prior.evidenceDigest,prior.ciReceiptDigest,prior.scanJobDigest].every(v=>hex.test(v))&&positive(prior.expiresAt)&&prior.expiresAt>clock(),'REVIEW_AUTOMATED_GATES_UNVERIFIED');
