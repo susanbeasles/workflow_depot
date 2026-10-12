@@ -15,6 +15,11 @@ When either input changes, close the previous integration PR, delete its ref,
 and recreate the identical ref with a new signed squash commit. Open a new PR.
 No sequence suffix appears in the branch name.
 
+All repository builds, tests, lint, scans, automated review, and required checks
+run exclusively against the signed integration candidate. Working branches,
+working PRs, and main updates trigger reconciliation only, never a parallel
+validation pipeline. No working-branch check result is required or accepted.
+
 ## Ownership and existing implementation
 
 The dedicated signing source is currently `/workspace/signing-control-staging`,
@@ -82,6 +87,33 @@ response, reconcile provider state before any retry; never blindly repeat
 deletion, signing, or PR creation. A partial replacement stays blocked and is
 recoverable without modifying the source branch.
 
+## Integration-only checks
+
+Check orchestration accepts only a service-owned `int/<working-branch>` ref
+with an active generation and its exact signed commit S. A matching name alone
+is insufficient. Check out S explicitly, verify it matches the integration PR
+head and retained candidate, and execute all repository validation against S.
+Do not validate the original working head, a provider-generated PR merge commit,
+or a moving branch name resolved later in the job.
+
+Working-PR events and main updates may invoke trusted reconciliation logic to
+construct, sign, and replace candidates. That logic reads source objects and
+verifies identity, authorization, signature, and parentage; it does not run
+repository builds, tests, scans, or review against the working branch or main.
+
+Use one validation run per integration generation and deduplicate overlapping
+branch/PR notifications. Attach check results to S and the integration PR.
+On replacement, cancel obsolete runs where possible and reject their results
+regardless of cancellation success. Reused ref names cannot reuse evidence.
+Validation failures block integration promotion; the original working PR has
+no required validation pipeline and is never the main-promotion vehicle.
+
+Audit existing caller workflows, reusable workflows, external checks, and
+required-check rules so that broad push/PR triggers do not keep validating
+working branches or main in parallel. Production enforcement is not complete
+until those integrations are verified. Integration checks must remain active
+for draft integration PRs; draft status must not silently skip validation.
+
 ## Restricted ref and concurrency requirements
 
 The publishing identity must be authorized to create and delete `int/*` refs
@@ -120,6 +152,10 @@ conflicts and no-op diffs; exact fixed ref names; deletion before recreation;
 new PR creation; source/main changes during signing and publication; duplicate
 events; stale worker deletion attempts; ambiguous provider outcomes; stale
 checks and approvals; unowned refs; source closure; and conditional promotion.
+Verify that working-branch pushes/PRs and main updates start no repository
+validation jobs, integration events validate only S, generated merge commits
+are never checked out, duplicate events start no duplicate validation, and
+results from superseded generations cannot qualify their replacements.
 
 Update producer/consumer contract tests together. No live key access, new key
 creation, deployment, activation, or protection changes belong to these tests.
