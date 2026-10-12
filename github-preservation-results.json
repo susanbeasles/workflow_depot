@@ -1,0 +1,107 @@
+[
+  {
+    "path": "/workspace/backup-control",
+    "branch": "preservation/20261012-backup-control",
+    "commit": "08d449d43e9a352c0a842153ad4bf837712460a2",
+    "changedFiles": 2,
+    "verified": true
+  },
+  {
+    "path": "/workspace/delivery_control",
+    "branch": "preservation/20261012-delivery_control",
+    "commit": "5b9d35c76ae1b54b27ad15c54a9eb0c20ade5d16",
+    "changedFiles": 0,
+    "verified": true
+  },
+  {
+    "path": "/workspace/ghcaretaker",
+    "branch": "preservation/20261012-ghcaretaker",
+    "commit": "648953e88d67ff560721ac059f49dc52037f2bc4",
+    "changedFiles": 0,
+    "verified": true
+  },
+  {
+    "path": "/workspace/personal-control",
+    "branch": "preservation/20261012-personal-control",
+    "commit": "2da310bc1a6843e76e7f12eeb40c163b0b92a95c",
+    "changedFiles": 0,
+    "verified": true
+  },
+  {
+    "path": "/workspace/repoctl",
+    "branch": "preservation/20261012-repoctl",
+    "commit": "3ab0fb003ec0c4d5cb37dfa85f3f91df6c273131",
+    "changedFiles": 0,
+    "verified": true
+  },
+  {
+    "path": "/workspace/workflow_depot",
+    "branch": "preservation/20261012-workflow_depot",
+    "commit": "bf8cd61cd2fba7afc2a4761a5fce172cf3b86ba8",
+    "changedFiles": 60,
+    "verified": true
+  },
+  {
+    "path": "/workspace/ProsRUs",
+    "branch": "preservation/20261012-prosrus",
+    "commit": "6afa1e1c20fe499c490bba7ead0d7cf3213a7dfa",
+    "changedFiles": 1,
+    "verified": true
+  },
+  {
+    "path": "/workspace/worktrees/prosrus-completion",
+    "branch": "preservation/20261012-prosrus-completion",
+    "commit": "e185f8b61d331417c20576f1517f338ddc1ab8df",
+    "changedFiles": 13,
+    "verified": true
+  },
+  {
+    "path": "/workspace/worktrees/personal-control-pane",
+    "branch": "preservation/20261012-personal-control-pane",
+    "commit": "71468b0b58bdb773cefd058904032608006e301c",
+    "changedFiles": 39,
+    "verified": true
+  },
+  {
+    "path": "/workspace/worktrees/repoctl-execution-check",
+    "branch": "preservation/20261012-repoctl-execution-check",
+    "commit": "a990452044ffe43f0a41039e6b192285d94a4261",
+    "changedFiles": 26,
+    "verified": true
+  },
+  {
+    "path": "/workspace/worktrees/personal-control-provisioner",
+    "branch": "preservation/20261012-personal-control-provisioner",
+    "commit": "60261cb7c1afa950d6a157760dd6fbb0b29fc529",
+    "changedFiles": 123,
+    "verified": true
+  },
+  {
+    "path": "/workspace/worktrees/ghcaretaker-integration",
+    "branch": "preservation/20261012-ghcaretaker-integration",
+    "commit": "6e7e90248dd445be906ddf9f5193ede5755e34c7",
+    "changedFiles": 20,
+    "verified": true
+  },
+  {
+    "path": "/workspace/worktrees/personal-control-pipeline",
+    "branch": "preservation/20261012-personal-control-pipeline",
+    "commit": "a84f48042d611c1f09cc110d9d4fcafe9dd8d1cd",
+    "changedFiles": 9,
+    "verified": true
+  },
+  {
+    "path": "/workspace/worktrees/delivery_control-pipeline",
+    "branch": "preservation/20261012-delivery_control-pipeline",
+    "commit": "e006eca4b5fe5134f9bf9a45ee44858d0d07514f",
+    "changedFiles": 26,
+    "verified": true
+  },
+  {
+    "path": "/workspace/worktrees/backup-control-automation",
+    "branch": "preservation/20261012-backup-control-automation",
+    "commit": "1f25aa77fbd16420fd919ef626f2194def377451",
+    "changedFiles": 15,
+    "verified": true
+  }
+]
