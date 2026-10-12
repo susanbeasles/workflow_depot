@@ -1,0 +1,44 @@
+name: Validate backup-control integration
+on:
+  workflow_call:
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  admission:
+    permissions:
+      contents: read
+      id-token: write
+    uses: susanbeasles/workflow_depot/.github/workflows/admit-integration.yml@8659f3b78f23870e78ac8f7c98f72b5d786c229a
+    with:
+      candidate_sha: ${{ github.sha }}
+  validate:
+    needs: [admission]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Ensure the distribution-signed rclone package is available
+        run: |
+          if [ ! -x /usr/bin/rclone ]; then
+            sudo apt-get update
+            sudo apt-get install --no-install-recommends -y rclone
+          fi
+          test -x /usr/bin/rclone
+          python3 --version
+      - name: Run offline Worker tests
+        run: node --test tests/*.test.mjs
+      # The standalone repository has no pinned Personal Control checkout.
+      # Its owner-contract composition test explicitly skips here; the combined
+      # Personal Control suite checks the actual provisioner implementation.
+      - name: Run offline Python tests with local replication fixtures
+        run: PYTHONPATH=scripts python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Verify the restore source checksum closure
+        run: sha256sum -c restore-closure.sha256
