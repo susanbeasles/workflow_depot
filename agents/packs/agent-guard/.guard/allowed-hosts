@@ -1,0 +1,13 @@
+# Hosts the agent may contact from the shell. One per line; subdomains match.
+# Anything else is blocked by .guard/hooks/pre-tool-guard.sh. Add to this file
+# yourself; the agent cannot (it's a protected path).
+github.com
+api.github.com
+raw.githubusercontent.com
+registry.npmjs.org
+pypi.org
+files.pythonhosted.org
+crates.io
+static.crates.io
+registry.terraform.io
+releases.hashicorp.com

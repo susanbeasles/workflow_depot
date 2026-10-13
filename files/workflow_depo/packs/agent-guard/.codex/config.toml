@@ -1,0 +1,4 @@
+# Codex ships with hooks OFF. This turns them on for this repo. Since 0.129
+# Codex also asks you to review/activate hooks once (run /hooks in the TUI).
+[features]
+hooks = true

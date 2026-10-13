@@ -1,0 +1,7 @@
+# Which repos workflow_depo manages. Owner is read from the OWNER env / gh auth.
+# Default: every non-archived, non-fork repo you own. Narrow with include, carve out with exclude.
+include: []          # empty = all;  e.g. ["terraform", "my-app"]
+exclude:
+  - workflow_depo    # never manage itself
+packs:
+  - agent-guard

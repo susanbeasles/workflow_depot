@@ -1,0 +1,21 @@
+name: status
+# Nightly state of affairs, no PRs. Also run on demand.
+on:
+  schedule: [{ cron: "17 6 * * *" }]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.WORKFLOW_DEPO_TOKEN }}
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y -qq jq && pip install -q pyyaml
+      - run: scripts/status.sh
+      - run: |
+          git config user.name workflow_depo; git config user.email workflow_depo@users.noreply.github.com
+          git add STATUS.md state/
+          git diff --cached --quiet || git commit -m "status: $(date -u +%F)" && git push

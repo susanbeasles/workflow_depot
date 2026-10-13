@@ -1,0 +1,11 @@
+name: agent-guard
+# Thin caller. The actual gate lives in workflow_depo and is updated centrally.
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  gate:
+    uses: __OWNER__/workflow_depo/.github/workflows/guard.yml@v1

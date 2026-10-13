@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# The completion gate. The agent cannot end its turn until this exits 0.
+# Keep it to the things that define "done" for this repo. Under ~5 min.
+set -uo pipefail
+have() { command -v "$1" >/dev/null 2>&1; }
+rc=0
+
+# Nothing half-written
+if git rev-parse --git-dir >/dev/null 2>&1; then
+  if git diff --name-only --diff-filter=U | grep -q .; then echo "unresolved merge conflicts"; rc=1; fi
+fi
+
+# Project test/lint entrypoints, if present
+if [[ -f package.json ]] && have npm; then
+  jq -e '.scripts.lint'      package.json >/dev/null 2>&1 && { npm run -s lint      || rc=1; }
+  jq -e '.scripts.typecheck' package.json >/dev/null 2>&1 && { npm run -s typecheck || rc=1; }
+  jq -e '.scripts.test'      package.json >/dev/null 2>&1 && { npm test -s          || rc=1; }
+fi
+[[ -f pyproject.toml ]] && have pytest && { pytest -q -x 2>&1 | tail -n 40; [[ ${PIPESTATUS[0]} -eq 0 ]] || rc=1; }
+if ls ./*.tf >/dev/null 2>&1 && have terraform; then
+  terraform fmt -check -recursive || rc=1
+  terraform validate -no-color  || rc=1
+fi
+[[ -f Makefile ]] && grep -qE '^check:' Makefile && have make && { make -s check || rc=1; }
+
+# No secrets in the working tree
+if have gitleaks; then
+  gitleaks detect --no-git --source . --no-banner --redact 2>/dev/null || { echo "gitleaks found a possible secret"; rc=1; }
+fi
+exit $rc

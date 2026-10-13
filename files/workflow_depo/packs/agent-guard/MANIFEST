@@ -1,0 +1,21 @@
+# agent-guard distribution manifest
+# managed = overwritten on every sync (drift is reported)
+# seeded  = created if missing, never touched again (repo-specific)
+managed .guard/hooks/_lib.sh
+managed .guard/hooks/pre-tool-guard.sh
+managed .guard/hooks/post-edit-check.sh
+managed .guard/hooks/stop-gate.sh
+managed .guard/hooks/session-log.sh
+managed .guard/hooks/session-start.sh
+managed .guard/.gitignore
+managed .guard/VERSION
+managed .claude/settings.json
+managed .codex/hooks.json
+managed .github/workflows/agent-guard.yml
+seeded  .guard/checks/on-edit
+seeded  .guard/checks/on-stop
+seeded  .guard/allowed-hosts
+seeded  .codex/config.toml
+seeded  .pre-commit-config.yaml
+seeded  AGENTS.md
+seeded  CLAUDE.md

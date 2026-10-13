@@ -1,0 +1,33 @@
+name: guard (reusable)
+# Called by every repo's .github/workflows/agent-guard.yml. Change it here, tag v1, done.
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Secret scan (full history)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Control-plane files changed?
+        if: github.event_name == 'pull_request'
+        run: |
+          changed=$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD \
+            | grep -E '^(\.claude/|\.codex/|\.github/|\.guard/|AGENTS\.md$|CLAUDE\.md$)' || true)
+          [ -n "$changed" ] && { echo "::warning::Control-plane files changed; review by hand:"; echo "$changed"; } || true
+      - name: Guard version
+        run: |
+          if [ -f .guard/VERSION ]; then echo "agent-guard $(cat .guard/VERSION)"; else echo "::warning::agent-guard not installed"; fi
+      - name: Install toolchain
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq jq shellcheck
+          [ -f package.json ] && npm ci || true
+          [ -f pyproject.toml ] && pip install -q ruff pytest && (pip install -q -e . || true) || true
+      - name: Completion gate
+        run: |
+          if [ -x .guard/checks/on-stop ]; then ./.guard/checks/on-stop; else echo "no gate configured"; fi

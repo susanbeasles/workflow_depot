@@ -1,0 +1,36 @@
+name: distribute
+# On every change to a pack (or on demand): open sync PRs in every managed repo,
+# then refresh STATUS.md. Needs secret WORKFLOW_DEPO_TOKEN (see README).
+on:
+  push:
+    branches: [main]
+    paths: ["packs/**", "repos.yml", "scripts/**"]
+  workflow_dispatch:
+    inputs:
+      dry_run: { description: "Report only, open no PRs", type: boolean, default: false }
+      repo:    { description: "Limit to one repo (optional)", type: string, default: "" }
+permissions:
+  contents: write
+concurrency: { group: distribute, cancel-in-progress: false }
+jobs:
+  distribute:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.WORKFLOW_DEPO_TOKEN }}
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y -qq jq && pip install -q pyyaml
+      - name: Sync packs
+        run: |
+          args=""
+          [ "${{ inputs.dry_run }}" = "true" ] && args="$args --dry-run"
+          [ -n "${{ inputs.repo }}" ] && args="$args --repo ${{ inputs.repo }}"
+          scripts/sync.sh $args
+      - name: Refresh status
+        run: scripts/status.sh
+      - name: Commit STATUS.md
+        run: |
+          git config user.name workflow_depo; git config user.email workflow_depo@users.noreply.github.com
+          git add STATUS.md state/
+          git diff --cached --quiet || git commit -m "status: $(date -u +%F)" && git push

@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Fast per-file checks, run after every agent edit. Keep this under ~10s.
+# Exit non-zero with useful output and the agent is told to fix it immediately.
+# Edit freely to match your stack; missing tools are skipped, not failed.
+set -uo pipefail
+FILE="$1"
+have() { command -v "$1" >/dev/null 2>&1; }
+rc=0
+case "$FILE" in
+  *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs)
+    if [[ -f package.json ]]; then
+      have npx && npx --no-install eslint --max-warnings=0 "$FILE" || rc=1
+      case "$FILE" in *.ts|*.tsx)
+        [[ -f tsconfig.json ]] && have npx && npx --no-install tsc --noEmit -p tsconfig.json || rc=1 ;;
+      esac
+    fi ;;
+  *.py)
+    have ruff && { ruff check "$FILE" || rc=1; ruff format --check "$FILE" || rc=1; } ;;
+  *.tf|*.tfvars)
+    have terraform && { terraform fmt -check -diff "$FILE" || rc=1; } ;;
+  *.sh|*.bash)
+    have shellcheck && { shellcheck -S warning "$FILE" || rc=1; }
+    bash -n "$FILE" || rc=1 ;;
+  *.json)
+    have jq && { jq -e . "$FILE" >/dev/null || rc=1; } ;;
+  *.yml|*.yaml)
+    have yamllint && { yamllint -d relaxed "$FILE" || rc=1; } ;;
+  *.toml)
+    have taplo && { taplo check "$FILE" || rc=1; } ;;
+esac
+# Secrets in the file just written: cheap, always on.
+if have gitleaks; then
+  gitleaks detect --no-git --source "$FILE" --no-banner --redact 2>/dev/null || { echo "gitleaks: possible secret in $FILE"; rc=1; }
+fi
+exit $rc
