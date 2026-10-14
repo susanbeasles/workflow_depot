@@ -30,3 +30,11 @@ GitHub documents that a reusable workflow's GitHub context belongs to the caller
 ## Candidate validation
 
 `.github/workflows/validate-controller.yml` validates the exact candidate SHA and runs its controller tests without privileged credentials. `repoctl-source.json` records the original source checkpoint. Existing repository policies govern who may invoke and change these workflows.
+
+
+
+## Agent protections
+
+This repository receives the same local agent hooks and standalone CI gate as the
+personal fleet. The supplied distribution pack belongs to `workflow_depo`;
+existing release and controller-validation workflows remain in this repository.
