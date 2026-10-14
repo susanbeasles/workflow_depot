@@ -1,0 +1,1 @@
+{"name":"deployment-environment-loader","private":true,"type":"module","scripts":{"test":"node --test test/*.test.mjs"},"engines":{"node":">=24"}}
