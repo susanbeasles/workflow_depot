@@ -54,15 +54,17 @@ def adapt(original):
  # Caller-waived CodeQL languages (space-separated). A waived language reports NOT_APPLICABLE with the
  # waiver in its reason, so it is named in the evidence instead of silently absent; the other
  # languages still gate, and SAST-SEMGREP (which includes p/swift) still gates the waived code.
- waive_in='      codeql_waive_languages:\n        description: "Space-separated CodeQL languages the caller waives (named in evidence; Semgrep still gates them). Example: swift"\n        type: string\n        default: ""\n'
+ waive_in='      codeql_waive_languages:\n        description: "Space-separated CodeQL languages the caller waives; only swift (covered by Semgrep p/swift) is honored, others still run"\n        type: string\n        default: ""\n'
  text=text.replace('    inputs:\n','    inputs:\n'+waive_in,1)
  codeql_step='      - uses: ./.security-depot/.github/actions/sast-codeql\n'
  assert text.count(codeql_step)==1
- waived="contains(format(' {0} ', inputs.codeql_waive_languages), format(' {0} ', matrix.language))"
+ # Only languages with a Semgrep pack in the default registry list may be waived (today: swift);
+ # any other listed language is ignored and CodeQL still runs on it.
+ waived="matrix.language == 'swift' && contains(format(' {0} ', inputs.codeql_waive_languages), format(' {0} ', matrix.language))"
  text=text.replace(codeql_step,
   "      - name: CodeQL waived by caller\n        if: ${{ "+waived+" }}\n"
   "        run: python3 .security-depot/.github/scripts/result.py --control \"SAST-CODEQL-${{ matrix.language }}\" --domain A --status NOT_APPLICABLE --reason \"waived by caller (codeql_waive_languages); SAST-SEMGREP still gates this code\" --tool codeql\n"
-  "      - if: ${{ !"+waived+" }}\n        uses: ./.security-depot/.github/actions/sast-codeql\n")
+  "      - if: ${{ !("+waived+") }}\n        uses: ./.security-depot/.github/actions/sast-codeql\n")
  return text
 if __name__=='__main__':
  import pathlib
