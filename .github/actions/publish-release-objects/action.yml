@@ -1,0 +1,34 @@
+name: Publish release objects to R2
+description: >-
+  Optional write-once publication to releases-r2/<application>/<releaseTag>/ through the
+  S3-compatible API (SigV4, If-None-Match: * on every PUT, release.meta.json last).
+inputs:
+  release_dir:
+    description: Verified, signed release directory
+    required: true
+  r2_account_id:
+    description: Cloudflare account id (32 hex)
+    required: true
+  r2_bucket:
+    description: Release bucket name
+    required: true
+  r2_access_key_id:
+    description: R2 access key id (pass from a secret)
+    required: true
+  r2_secret_access_key:
+    description: R2 secret access key (pass from a secret)
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        SCRIPTS: ${{ github.action_path }}/../../../ci/release
+        RELEASE_DIR: ${{ inputs.release_dir }}
+        R2_ACCOUNT_ID: ${{ inputs.r2_account_id }}
+        R2_BUCKET: ${{ inputs.r2_bucket }}
+        R2_ACCESS_KEY_ID: ${{ inputs.r2_access_key_id }}
+        R2_SECRET_ACCESS_KEY: ${{ inputs.r2_secret_access_key }}
+      run: |
+        set -euo pipefail
+        node "$SCRIPTS/publish-objects.mjs" --release-dir "$RELEASE_DIR" --account-id "$R2_ACCOUNT_ID" --bucket "$R2_BUCKET"

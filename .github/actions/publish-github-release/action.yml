@@ -1,0 +1,37 @@
+name: Publish GitHub Release
+description: >-
+  Write-once GitHub Release for the tag: fails if the release (or, for main pushes, the
+  tag) already exists; creates a draft targeting the exact commit, uploads the ten release
+  assets, rechecks the tag, publishes, and confirms the tag points at the commit.
+  Requires contents: write.
+inputs:
+  release_dir:
+    description: Verified, signed release directory
+    required: true
+  release_tag:
+    description: Release tag
+    required: true
+  github_token:
+    description: Token with contents write on the calling repository
+    required: false
+    default: ${{ github.token }}
+outputs:
+  release_url:
+    description: Published release URL
+    value: ${{ steps.publish.outputs.release_url }}
+  release_id:
+    description: Published release id
+    value: ${{ steps.publish.outputs.release_id }}
+runs:
+  using: composite
+  steps:
+    - id: publish
+      shell: bash
+      env:
+        SCRIPTS: ${{ github.action_path }}/../../../ci/release
+        RELEASE_DIR: ${{ inputs.release_dir }}
+        RELEASE_TAG: ${{ inputs.release_tag }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        set -euo pipefail
+        node "$SCRIPTS/publish-github-release.mjs" --release-dir "$RELEASE_DIR" --release-tag "$RELEASE_TAG" --github-output "$GITHUB_OUTPUT"

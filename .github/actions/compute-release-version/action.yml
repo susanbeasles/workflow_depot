@@ -1,0 +1,31 @@
+name: Compute release version
+description: >-
+  Decides whether this push releases. main pushes get the next vX.Y.Z from Conventional
+  Commits since the last tag (none releasable => released=false); vX.Y.Z tag pushes must
+  point at the exact commit. Requires a checkout with full history and tags.
+inputs:
+  app_path:
+    description: Application checkout (actions/checkout with fetch-depth 0)
+    required: true
+  state_dir:
+    description: Directory for release hand-off files
+    required: true
+outputs:
+  released:
+    description: "'true' when this push produces a release"
+    value: ${{ steps.compute.outputs.released }}
+  release_tag:
+    description: The release tag (empty when released is false)
+    value: ${{ steps.compute.outputs.release_tag }}
+runs:
+  using: composite
+  steps:
+    - id: compute
+      shell: bash
+      env:
+        SCRIPTS: ${{ github.action_path }}/../../../ci/release
+        APP_PATH: ${{ inputs.app_path }}
+        STATE_DIR: ${{ inputs.state_dir }}
+      run: |
+        set -euo pipefail
+        node "$SCRIPTS/compute-version.mjs" --repo "$APP_PATH" --out "$STATE_DIR/version.json" --github-output "$GITHUB_OUTPUT"

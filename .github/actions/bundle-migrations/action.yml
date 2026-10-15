@@ -1,0 +1,30 @@
+name: Bundle D1 migrations
+description: >-
+  Packages every listed cloudflare-d1-migrate/v1 target into targets/<target-id>.zip with a
+  migrations-ledger/v1. SQL is copied byte-for-byte and never executed.
+inputs:
+  app_path:
+    description: Application checkout
+    required: true
+  application_path:
+    description: Validated application manifest from read-application-manifest
+    required: true
+  targets:
+    description: JSON array of cloudflare-d1-migrate/v1 target ids (read-application-manifest output; may be [])
+    required: true
+  release_dir:
+    description: Release output directory
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        SCRIPTS: ${{ github.action_path }}/../../../ci/release
+        APP_PATH: ${{ inputs.app_path }}
+        APPLICATION_PATH: ${{ inputs.application_path }}
+        TARGETS: ${{ inputs.targets }}
+        RELEASE_DIR: ${{ inputs.release_dir }}
+      run: |
+        set -euo pipefail
+        node "$SCRIPTS/bundle-migrations.mjs" --app-root "$APP_PATH" --application "$APPLICATION_PATH" --targets "$TARGETS" --out-dir "$RELEASE_DIR"

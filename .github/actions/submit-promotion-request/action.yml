@@ -1,0 +1,47 @@
+name: Submit promotion request
+description: >-
+  Builds a promotion-request/v1 (UUIDv7 requestId) from a verified release.meta.json and
+  POSTs it once to the admission Worker with a GitHub OIDC token for the given audience.
+  https only, redirects are errors, no retries; prints only the HTTP status and requestId.
+  The calling job needs id-token: write. Admission URL and audience must come from the
+  Terraform registry, never from the release bundle.
+inputs:
+  manifest_path:
+    description: Verified release.meta.json
+    required: true
+  admission_url:
+    description: https URL of the admission Worker endpoint
+    required: true
+  admission_audience:
+    description: OIDC audience the admission Worker expects
+    required: true
+  environment:
+    description: Target environment (e.g. staging)
+    required: true
+  release_bucket:
+    description: Release bucket name used in releaseManifestUri
+    required: false
+    default: releases-r2
+  expected_generation:
+    description: Current committed generation (compare-and-swap)
+    required: true
+  github_deployment_id:
+    description: GitHub Deployment id for status reporting
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        SCRIPTS: ${{ github.action_path }}/../../../ci/release
+        MANIFEST_PATH: ${{ inputs.manifest_path }}
+        ADMISSION_URL: ${{ inputs.admission_url }}
+        ADMISSION_AUDIENCE: ${{ inputs.admission_audience }}
+        TARGET_ENVIRONMENT: ${{ inputs.environment }}
+        RELEASE_BUCKET: ${{ inputs.release_bucket }}
+        EXPECTED_GENERATION: ${{ inputs.expected_generation }}
+        GITHUB_DEPLOYMENT_ID: ${{ inputs.github_deployment_id }}
+      run: |
+        set -euo pipefail
+        node "$SCRIPTS/submit-promotion-request.mjs" --admission-url "$ADMISSION_URL" --audience "$ADMISSION_AUDIENCE" --manifest "$MANIFEST_PATH" \
+          --environment "$TARGET_ENVIRONMENT" --bucket "$RELEASE_BUCKET" --expected-generation "$EXPECTED_GENERATION" --github-deployment-id "$GITHUB_DEPLOYMENT_ID"

@@ -1,0 +1,34 @@
+name: Resolve release context
+description: >-
+  Binds the release to the caller's push context (repository, numeric repository id,
+  commit, ref, run) and the computed tag. Fails closed for any other event or ref.
+inputs:
+  release_tag:
+    description: Tag from compute-release-version
+    required: true
+  state_dir:
+    description: Directory for release hand-off files
+    required: true
+outputs:
+  release_tag:
+    description: Validated release tag
+    value: ${{ steps.resolve.outputs.release_tag }}
+  source_commit:
+    description: Exact source commit
+    value: ${{ steps.resolve.outputs.source_commit }}
+  context_path:
+    description: Path of the release-context/v1 file
+    value: ${{ steps.resolve.outputs.context_path }}
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      env:
+        SCRIPTS: ${{ github.action_path }}/../../../ci/release
+        RELEASE_TAG: ${{ inputs.release_tag }}
+        STATE_DIR: ${{ inputs.state_dir }}
+      run: |
+        set -euo pipefail
+        node "$SCRIPTS/resolve-context.mjs" --release-tag "$RELEASE_TAG" --out "$STATE_DIR/context.json" --github-output "$GITHUB_OUTPUT"
+        printf 'context_path=%s\n' "$STATE_DIR/context.json" >> "$GITHUB_OUTPUT"
