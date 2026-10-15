@@ -1,0 +1,21 @@
+name: Request shadow candidate
+description: >
+  From a pull_request run whose earlier stages passed, ask the authorizer to build the shadow candidate:
+  the PR squashed onto the current main tip on shadow/pr-<n>. The pipeline then runs on that exact commit.
+  The calling job needs `permissions: id-token: write` and nothing else.
+outputs:
+  candidate_sha:
+    description: The candidate commit the pipeline will run on.
+    value: ${{ steps.request.outputs.candidate_sha }}
+  shadow_ref:
+    description: refs/heads/shadow/pr-<n>
+    value: ${{ steps.request.outputs.shadow_ref }}
+  reused:
+    description: true when the candidate already existed for this head and base.
+    value: ${{ steps.request.outputs.reused }}
+runs:
+  using: composite
+  steps:
+    - id: request
+      shell: bash
+      run: node "$GITHUB_ACTION_PATH/main.mjs"
