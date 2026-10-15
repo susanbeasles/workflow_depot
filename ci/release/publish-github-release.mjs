@@ -10,7 +10,7 @@ import {LIMITS,REPOSITORY,RELEASE_TAG,SHA40,parseJson,validateReleaseManifest} f
 import {parseArgs,isMain,runCli,readRegularFile,writeGithubOutput} from './io.mjs';
 
 const API='https://api.github.com',UPLOADS='https://uploads.github.com';
-export const RELEASE_ASSETS=['release.zip','release.zip.sigstore.json','release.meta.json','release.meta.json.sigstore.json','release.zip.intoto.jsonl',
+export const RELEASE_ASSETS=['release.zip','release.zip.sigstore.json','release.meta.json','release.meta.json.sigstore.json',
  'sbom.cdx.json','sbom.spdx.json','checksums.json','SHA256SUMS','authorization-policy.json'];
 const contentTypeOf=name=>name.endsWith('.zip')?'application/zip':name.endsWith('.json')?'application/json':name.endsWith('.jsonl')?'application/jsonl':'text/plain';
 const hex=bytes=>createHash('sha256').update(bytes).digest('hex');

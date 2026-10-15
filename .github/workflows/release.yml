@@ -2,7 +2,7 @@
 # checks; composed only of this depot's single-concern composite actions.
 #
 #   prepare -> worker-bundles (matrix, one leg per worker target) -> bundle   (all contents: read)
-#   -> attest (id-token + attestations: write) -> publish (contents: write) -> publish-objects (optional R2)
+#   -> attest (id-token: write, cosign) -> publish (contents: write) -> publish-objects (optional R2)
 #
 # Runs for push events on refs/heads/main (version from Conventional Commits since the last
 # vX.Y.Z tag; nothing releasable => released=false and success) or on a vX.Y.Z tag push that
@@ -288,14 +288,13 @@ jobs:
           printf '### Release bundle\n\n- tag: %s\n- release.meta.json sha256: %s\n' "$RELEASE_TAG" "$MANIFEST_SHA256" >> "$GITHUB_STEP_SUMMARY"
 
   attest:
-    name: Attest (OIDC signing and provenance)
+    name: Attest (OIDC signing, cosign)
     needs: bundle
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
       id-token: write
-      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -326,7 +325,6 @@ jobs:
           path: |
             ${{ github.workspace }}/.release/out/release.zip.sigstore.json
             ${{ github.workspace }}/.release/out/release.meta.json.sigstore.json
-            ${{ github.workspace }}/.release/out/release.zip.intoto.jsonl
           if-no-files-found: error
           retention-days: 7
 

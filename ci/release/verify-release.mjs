@@ -18,7 +18,7 @@ const equalBytes=(a,b)=>a.length===b.length&&Buffer.compare(Buffer.from(a.buffer
 const ZIP_RATIO=100;
 
 export const BASE_FILES=['release.meta.json','release.zip','checksums.json','SHA256SUMS','authorization-policy.json'];
-export const SIGNED_FILES=['release.zip.sigstore.json','release.meta.json.sigstore.json','release.zip.intoto.jsonl'];
+export const SIGNED_FILES=['release.zip.sigstore.json','release.meta.json.sigstore.json'];
 
 function strictDocument(bytes,validate,label,maxBytes=LIMITS.jsonBytes){
  const value=validate(parseJson(bytes,{maxBytes,label}));

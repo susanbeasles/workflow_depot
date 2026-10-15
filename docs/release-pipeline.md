@@ -14,7 +14,7 @@ worker-bundles (contents: read; one matrix leg per cloudflare-worker/v1 target)
 bundle (contents: read)
   bundle-migrations (every D1 target) -> write-authorization-policy -> generate-sbom
   -> checksum-bundles -> assemble-release -> write-release-manifest -> verify-release (unsigned)
-attest (contents: read, id-token: write, attestations: write)
+attest (contents: read, id-token: write)
   verify-release (unsigned) -> attest-release
 publish (contents: write)
   verify-release (signed) -> publish-github-release
@@ -31,7 +31,6 @@ jobs:
     permissions:
       contents: write                  # publish job: GitHub Release
       id-token: write                  # attest job: keyless signing
-      attestations: write              # attest job: build provenance
     uses: susanbeasles/workflow_depot/.github/workflows/release.yml@REVIEWED_DEPOT_SHA
     with:
       depot_ref: REVIEWED_DEPOT_SHA    # must equal the SHA in `uses:`
@@ -77,13 +76,12 @@ Published on the GitHub Release (exact names):
 | `release.zip.sigstore.json` | cosign `sign-blob` bundle over `release.zip` |
 | `release.meta.json` | `release-manifest/v2` (canonical JSON; its sha256 is the manifest digest) |
 | `release.meta.json.sigstore.json` | cosign `sign-blob` bundle over `release.meta.json` |
-| `release.zip.intoto.jsonl` | `actions/attest-build-provenance` bundle (`bundle-path`) for `release.zip` |
 | `sbom.cdx.json`, `sbom.spdx.json` | CycloneDX / SPDX from syft over the unpacked bundles |
 | `checksums.json`, `SHA256SUMS` | `release-checksums/v1` and the same digests as text |
 | `authorization-policy.json` | `authorization-policy/v1` consumed by admission |
 
-Every `targets/*.zip` additionally gets its own provenance attestation in the repository's
-attestation store, so per-target digests verify with `gh attestation verify`.
+GitHub artifact attestations are not used. Every `targets/*.zip` is covered by its sha256 in
+`release.meta.json`, which is signed and verified with cosign.
 
 Bundles: every target is bundled at `targets/<target-id>.zip` (ids are `^[a-z0-9-]{1,64}$`, unique,
 so paths stay flat). A worker bundle holds `artifact.json` (`workflow-depot-worker-artifact/v2`,
@@ -126,22 +124,14 @@ cosign verify-blob --bundle release.zip.sigstore.json \
   --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" release.zip
 cosign verify-blob --bundle release.meta.json.sigstore.json \
   --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" release.meta.json
-cosign verify-blob-attestation --bundle release.zip.intoto.jsonl --new-bundle-format \
-  --type slsaprovenance1 \
-  --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" release.zip
-gh attestation verify release.zip --repo OWNER/APP \
-  --bundle release.zip.intoto.jsonl --cert-identity "$IDENTITY" --cert-oidc-issuer "$ISSUER"
 
 # Structural re-verification with the depot at the same SHA (bundles are read from release.zip):
 node /path/to/workflow_depot/ci/release/verify-release.mjs --release-dir . --stage signed --layout published
 ```
 
 Then check that `release.meta.json` names the expected `repository`, `repositoryId`, `releaseTag`
-and `sourceCommit`, and use `targets[].sha256` (equal to `checksums.json`) for each bundle. Per-target
-provenance: extract a bundle from `release.zip` and run
-`gh attestation verify targets/<target-id>.zip --repo OWNER/APP --cert-identity "$IDENTITY" --cert-oidc-issuer "$ISSUER"`.
-The cosign and `gh` flags above follow cosign v2.4+/v3 and current `gh`; confirm them against the
-installed versions when commissioning, since they could not be exercised offline here.
+and `sourceCommit`, and use `targets[].sha256` (equal to `checksums.json`) for each bundle extracted
+from `release.zip`. The cosign flags above follow cosign v3; confirm them on the first live release.
 
 ## Composite actions
 
@@ -158,7 +148,7 @@ installed versions when commissioning, since they could not be exercised offline
 | `assemble-release` | Re-verifies checksums, writes deterministic `release.zip`. |
 | `write-release-manifest` | `release.meta.json` with `builder.workflow = <depot>/.github/workflows/release.yml@<depot_ref>`. |
 | `verify-release` | Independent re-check of every digest, ZIP hygiene and cross-document consistency. Runs before signing and again before each publication. |
-| `attest-release` | cosign `sign-blob` + `verify-blob` (pinned `sigstore/cosign-installer`), `actions/attest-build-provenance` for `release.zip` and `targets/*.zip`. |
+| `attest-release` | cosign `sign-blob` + `verify-blob` over `release.zip` and `release.meta.json`; cosign v3.1.3 from the SHA-256 pinned tool registry. No GitHub artifact attestations. |
 | `publish-github-release` | Write-once Release: refuse existing release/tag, draft at the exact commit, upload ten assets (checking name, size and digest), recheck tag, publish, confirm tag target. |
 | `publish-release-objects` | Optional R2 copy at `<bucket>/<application>/<tag>/`: SigV4 (`ci/release/sigv4.mjs`), `If-None-Match: *` on every PUT, `release.meta.json` last. |
 | `submit-promotion-request` | Deploy-stage helper (not wired into `release.yml`): builds `promotion-request/v1` (UUIDv7) and POSTs it once with a GitHub OIDC token; https only, redirects are errors, prints only status and requestId. Inputs: `manifest_path`, `admission_url`, `admission_audience`, `environment`, `release_bucket`, `expected_generation`, `github_deployment_id`; needs `id-token: write`. |
@@ -205,4 +195,4 @@ installed versions when commissioning, since they could not be exercised offline
   `wrangler secret put` are not listed in the config, so the deployer must keep them.
 - The SBOM covers the release payload; bundled JavaScript without package manifests yields sparse
   component lists (syft's documented blind spot).
-- Artifact attestations for private repositories depend on the GitHub plan; check before commissioning.
+- GitHub artifact attestations are not used (not available on this account); signing is cosign only.
