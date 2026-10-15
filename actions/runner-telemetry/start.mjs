@@ -26,6 +26,9 @@ export function start(env = process.env, { platform = process.platform, spawnImp
     mkdirSync(dir, { recursive: true });
     writeFileSync(file, '');
     const child = spawnImpl(execPath, [join(HERE, 'sampler.mjs'), file, String(seconds), env.GITHUB_WORKSPACE ?? ''], { detached: true, stdio: 'ignore' });
+    // spawn can return a child and emit ENOENT/EACCES on a later tick. Without
+    // a listener that error terminates the action despite the surrounding try.
+    child.on?.('error', () => {});
     child.unref?.();
     if (!Number.isSafeInteger(child.pid)) throw Object.assign(new Error('sampler did not start'), { code: 'spawn_failed' });
     saveState(env, { pid: child.pid, file, interval: seconds });
