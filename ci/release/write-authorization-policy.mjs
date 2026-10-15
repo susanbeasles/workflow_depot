@@ -2,7 +2,7 @@
 // application manifest and the depot workflow identity that will sign the release.
 // The expiry derives from the source commit time so release.zip stays reproducible.
 import {join} from 'node:path';
-import {SCHEMAS,GITHUB_ISSUER,formatTimestamp,releaseWorkflowRef,signerIdentity,validateAuthorizationPolicy} from '../../src/shared/release-contract.mjs';
+import {ADAPTERS,SCHEMAS,GITHUB_ISSUER,formatTimestamp,releaseWorkflowRef,signerIdentity,validateAuthorizationPolicy} from '../../src/shared/release-contract.mjs';
 import {loadApplication,loadContext} from './read-application.mjs';
 import {parseArgs,isMain,runCli,writeCanonical} from './io.mjs';
 
@@ -15,6 +15,7 @@ export function authorizationPolicy({application,context,depotRepository,depotSh
   schema:SCHEMAS.policy,policyVersion:1,application:application.application,repository:application.repository,repositoryId:application.repositoryId,
   releasePrefix:`${application.application}/`,sourceCommit:context.sourceCommit,releaseTag:context.releaseTag,
   signer:{issuer:GITHUB_ISSUER,identity:signerIdentity(releaseWorkflowRef(depotRepository,depotSha))},
+  targets:Object.fromEntries(application.targets.map(t=>[t.id,t.adapter===ADAPTERS.worker?{adapter:t.adapter,healthContract:t.healthContract}:{adapter:t.adapter,recoveryPolicy:t.recoveryPolicy}])),
   environments:Object.fromEntries(Object.entries(application.environments).map(([name,env])=>[name,{allowedRefs:env.allowedRefs,requiredApprovals:env.requiredApprovals,targets}])),
   expiresAt:formatTimestamp((sourceDateEpoch+validityDays*86400)*1000),
  });

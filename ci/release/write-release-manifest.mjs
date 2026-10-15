@@ -2,7 +2,7 @@
 // canonical JSON, so sha256(file bytes) equals the canonical manifest digest.
 import {createHash} from 'node:crypto';
 import {join} from 'node:path';
-import {ADAPTERS,ARTIFACT_PATHS,LIMITS,SCHEMAS,isTimestamp,formatTimestamp,releaseWorkflowRef,canonicalBytes,validateReleaseManifest} from '../../src/shared/release-contract.mjs';
+import {ADAPTERS,LIMITS,artifactPathFor,SCHEMAS,isTimestamp,formatTimestamp,releaseWorkflowRef,canonicalBytes,validateReleaseManifest} from '../../src/shared/release-contract.mjs';
 import {loadChecksums} from './assemble-release.mjs';
 import {loadApplication,loadContext} from './read-application.mjs';
 import {parseArgs,isMain,runCli,writeOnce,writeGithubOutput,readRegularFile} from './io.mjs';
@@ -17,7 +17,7 @@ export function releaseManifest({releaseDir,application,context,depotRepository,
  const policy=readRegularFile(join(releaseDir,'authorization-policy.json'),LIMITS.jsonBytes,'authorization-policy.json');
  if(hex(policy)!==checksums.files['authorization-policy.json'].sha256)throw Error('authorization-policy.json does not match checksums.json');
  const targets=application.targets.map(t=>{
-  const artifactPath=ARTIFACT_PATHS[t.adapter],entry=checksums.files[artifactPath];
+  const artifactPath=artifactPathFor(t.id),entry=checksums.files[artifactPath];
   if(!entry)throw Error(`checksums.json has no entry for ${artifactPath}`);
   const data=readRegularFile(join(releaseDir,artifactPath),LIMITS.bundleBytes,artifactPath);
   if(hex(data)!==entry.sha256||data.length!==entry.sizeBytes)throw Error(`${artifactPath} does not match checksums.json`);

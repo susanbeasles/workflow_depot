@@ -26,6 +26,12 @@ export function application(){
   environments:{staging:{allowedRefs:['refs/heads/main'],requiredApprovals:0},production:{allowedRefs:['refs/tags/v*'],requiredApprovals:1}},
  };
 }
+// Product worker + separate replicator worker + D1 migrations (contracts section 10).
+export function applicationWithReplicator(){
+ const app=application();
+ app.targets.push({id:'demoapp-replicator',adapter:'cloudflare-worker/v1',build:{wranglerConfig:'wrangler.replicator.jsonc',entry:'src/replicator/worker.ts'},dependsOn:['demoapp-d1-migrations'],healthContract:'worker-version/v1'});
+ return app;
+}
 export function context(overrides={}){
  return {schema:'release-context/v1',repository:'example-owner/demo-app',repositoryId:4242,sourceCommit:SOURCE_COMMIT,ref:'refs/heads/main',releaseTag:'v1.2.3',runId:'1001',runAttempt:'1',...overrides};
 }
@@ -50,6 +56,22 @@ export const WRANGLER=`{
  "migrations":[{"tag":"v1","new_sqlite_classes":["Coordinator"]}],
  "queues":{"producers":[{"binding":"JOBS","queue":"demo-staging"}],"consumers":[]},
  "triggers":{"crons":[]},
+ "secrets_store_secrets":[{"binding":"SIGNING_MATERIAL","store_id":"00000000000000000000000000000000","secret_name":"demo-demo-demo"}],
+}
+`;
+
+// Routeless replicator (worker-version/v1): no assets, no queues, workers_dev false.
+export const REPLICATOR_WRANGLER=`{
+ "name":"demo-app-staging-replicator",
+ "main":"src/replicator/worker.ts",
+ "compatibility_date":"2026-10-08",
+ "compatibility_flags":["nodejs_compat"],
+ "workers_dev":false,
+ "observability":{"enabled":true,"head_sampling_rate":1},
+ "vars":{"OWNER_ID":"UNCONFIGURED"},
+ "d1_databases":[{"binding":"DB","database_name":"demo-staging","database_id":"00000000-0000-0000-0000-000000000000"}],
+ "r2_buckets":[{"binding":"ORIGINALS","bucket_name":"demo-staging-originals"},{"binding":"BACKUP","bucket_name":"demo-staging-backup"}],
+ "triggers":{"crons":["*/5 * * * *","23 3 * * *","53 3 1 * *"]},
 }
 `;
 
@@ -62,6 +84,8 @@ export function makeApp(){
  const app=join(root,'app');
  write(app,'deployment/application.json',JSON.stringify(application(),null,2));
  write(app,'wrangler.jsonc',WRANGLER);
+ write(app,'wrangler.replicator.jsonc',REPLICATOR_WRANGLER);
+ write(app,'src/replicator/worker.ts','export default {};\n');
  write(app,'src/worker.ts','export default {};\n');
  write(app,'dist/index.html','<!doctype html><title>demo</title>\n');
  write(app,'dist/assets/app-abc123.js','console.log("demo");\n');
@@ -73,15 +97,20 @@ export function makeApp(){
  write(root,'wrangler-out/worker.js','export default {async fetch(){return new Response("ok");}};\n');
  write(root,'wrangler-out/worker.js.map','{}');
  write(root,'wrangler-out/README.md','wrangler output\n');
+ write(root,'wrangler-out-replicator/index.js','export default {async scheduled(){},async queue(){}};\n');
  const state=join(root,'state');mkdirSync(state);
  write(state,'application.json',canonicalBytes(application()));
  write(state,'context.json',canonicalBytes(context()));
- return {root,app,wranglerOut,state,out:join(root,'out'),cleanup:()=>rmSync(root,{recursive:true,force:true})};
+ return {root,app,wranglerOut,replicatorOut:join(root,'wrangler-out-replicator'),state,out:join(root,'out'),cleanup:()=>rmSync(root,{recursive:true,force:true})};
 }
 
 export async function buildRelease(f,{out=f.out,ctx=context(),app=application()}={}){
- const worker=await buildWorkerBundle({appRoot:f.app,application:app,targetId:'demoapp-worker',wranglerOutdir:f.wranglerOut,outDir:out,releaseTag:ctx.releaseTag,sourceCommit:ctx.sourceCommit});
- const migrations=bundleMigrations({appRoot:f.app,application:app,targetId:'demoapp-d1-migrations',outDir:out});
+ const outdirs={'demoapp-worker':f.wranglerOut,'demoapp-replicator':f.replicatorOut},bundles={};
+ for(const t of app.targets){
+  bundles[t.id]=t.adapter==='cloudflare-worker/v1'
+   ?await buildWorkerBundle({appRoot:f.app,application:app,targetId:t.id,wranglerOutdir:outdirs[t.id],outDir:out,releaseTag:ctx.releaseTag,sourceCommit:ctx.sourceCommit})
+   :bundleMigrations({appRoot:f.app,application:app,targetId:t.id,outDir:out});
+ }
  write(out,'authorization-policy.json',canonicalBytes(authorizationPolicy({application:app,context:ctx,depotRepository:DEPOT.repository,depotSha:DEPOT.sha,sourceDateEpoch:SOURCE_DATE_EPOCH})));
  write(out,'sbom.cdx.json',JSON.stringify({bomFormat:'CycloneDX',specVersion:'1.6',components:[]}));
  write(out,'sbom.spdx.json',JSON.stringify({spdxVersion:'SPDX-2.3',packages:[]}));
@@ -89,6 +118,6 @@ export async function buildRelease(f,{out=f.out,ctx=context(),app=application()}
  const release=assembleRelease(out);
  const manifest=releaseManifest({releaseDir:out,application:app,context:ctx,depotRepository:DEPOT.repository,depotSha:DEPOT.sha,createdAt:CREATED_AT});
  write(out,'release.meta.json',canonicalBytes(manifest));
- return {worker,migrations,release,manifest};
+ return {bundles,worker:bundles['demoapp-worker'],migrations:bundles['demoapp-d1-migrations'],release,manifest};
 }
 export const nowStamp=()=>formatTimestamp(Date.now());

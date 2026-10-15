@@ -22,9 +22,11 @@ export const SCHEMAS=Object.freeze({
  promotion:'promotion-request/v1',marker:'release-marker/v1',context:'release-context/v1',
 });
 export const ADAPTERS=Object.freeze({worker:'cloudflare-worker/v1',d1:'cloudflare-d1-migrate/v1'});
-// One bundle per adapter keeps the contract's fixed bundle names (targets/worker.zip, targets/migrations.zip).
-export const ARTIFACT_PATHS=Object.freeze({[ADAPTERS.worker]:'targets/worker.zip',[ADAPTERS.d1]:'targets/migrations.zip'});
 export const GITHUB_ISSUER='https://token.actions.githubusercontent.com';
+// http-release-marker/v1: the deployer checks GET /.well-known/release-marker (or the RPC).
+// worker-version/v1: routeless Worker (no route, workers_dev false, no assets); the deployer
+// proves the release by the active deployed version instead of HTTP.
+export const HEALTH_CONTRACTS=Object.freeze(['http-release-marker/v1','worker-version/v1']);
 
 export const HEX64=/^[a-f0-9]{64}$/;
 export const SHA40=/^[a-f0-9]{40}$/;
@@ -44,6 +46,7 @@ const MIGRATION_TAG=/^[A-Za-z0-9_.-]{1,64}$/;
 const MIGRATION_FILE=/^(\d{4})(?:_[A-Za-z0-9_-]{1,64})?\.sql$/;
 const CONTENT_TYPE=/^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}(?:; ?charset=[a-z0-9_-]{1,32})?$/;
 const REF_PATTERN=/^refs\/(?:heads|tags)\/(?:[A-Za-z0-9._\/-]{1,200}\*?|\*)$/;
+const CRON=/^[0-9A-Za-z*?\/,#-]{1,20}(?: [0-9A-Za-z*?\/,#-]{1,20}){4}$/;
 
 const matches=(pattern,value)=>typeof value==='string'&&pattern.test(value);
 const object=v=>v!==null&&typeof v==='object'&&!Array.isArray(v)&&Object.getPrototypeOf(v)===Object.prototype;
@@ -81,6 +84,11 @@ export function releaseWorkflowRef(depotRepository,depotSha){
  return `${depotRepository}/.github/workflows/release.yml@${depotSha}`;
 }
 export const signerIdentity=workflowRef=>`https://github.com/${workflowRef}`;
+// Every target is bundled at targets/<target-id>.zip; TARGET_ID keeps the path flat and safe.
+export function artifactPathFor(targetId){
+ req(matches(TARGET_ID,targetId),'Invalid target id');
+ return `targets/${targetId}.zip`;
+}
 
 // JSON.parse silently keeps the last duplicate key; contracts require rejecting them.
 export function parseJson(input,{maxBytes=LIMITS.jsonBytes,label='JSON'}={}){
@@ -179,17 +187,16 @@ export function validateApplication(a){
  req(a.schema===SCHEMAS.application,`${label}: wrong schema`);
  req(matches(APPLICATION_ID,a.application)&&matches(REPOSITORY,a.repository)&&positive(a.repositoryId),`${label}: invalid identity`);
  req(Array.isArray(a.targets)&&a.targets.length>=1&&a.targets.length<=LIMITS.targets,`${label}: expected 1..${LIMITS.targets} targets`);
- const perAdapter=new Map();
  for(const t of a.targets){
   req(object(t)&&Object.values(ADAPTERS).includes(t.adapter),`${label}: unknown adapter`);
   req(matches(TARGET_ID,t.id),`${label}: invalid target id`);
-  perAdapter.set(t.adapter,(perAdapter.get(t.adapter)||0)+1);
   if(t.adapter===ADAPTERS.worker){
    keys(t,['id','adapter','build','dependsOn','healthContract'],[],`${label}: target ${t.id}`);
    keys(t.build,['wranglerConfig','entry'],['assetsDir','buildCommand'],`${label}: target ${t.id} build`);
    req(['wranglerConfig','entry','assetsDir'].every(k=>!Object.hasOwn(t.build,k)||isRelativePath(t.build[k])),`${label}: target ${t.id} build path must be normalized and relative`);
    req(!Object.hasOwn(t.build,'buildCommand')||matches(NPM_SCRIPT,t.build.buildCommand),`${label}: buildCommand must name an npm script`);
-   req(t.healthContract==='http-release-marker/v1',`${label}: unsupported healthContract`);
+   req(HEALTH_CONTRACTS.includes(t.healthContract),`${label}: unsupported healthContract`);
+   req(t.healthContract!=='worker-version/v1'||!Object.hasOwn(t.build,'assetsDir'),`${label}: worker-version/v1 targets are routeless and cannot serve assets`);
   }else{
    keys(t,['id','adapter','build','dependsOn','recoveryPolicy'],[],`${label}: target ${t.id}`);
    keys(t.build,['migrationsDir','binding'],[],`${label}: target ${t.id} build`);
@@ -198,7 +205,6 @@ export function validateApplication(a){
    req(t.recoveryPolicy==='forward-only',`${label}: unsupported recoveryPolicy`);
   }
  }
- req([...perAdapter.values()].every(n=>n===1),`${label}: at most one target per adapter is supported`);
  dependencies(a.targets,label);
  environmentSet(a.environments,`${label}.environments`,false);
  return a;
@@ -238,6 +244,24 @@ function doMigrations(m,label){
  req(steps>0,`${label}: empty migration`);
 }
 
+// Cron and queue-consumer settings are infrastructure-owned (Terraform registry). They are
+// recorded only so the deployer can compare them with the registry; they confer no authority.
+function declaredTriggers(d,label){
+ keys(d,['crons','queueConsumers'],[],label);
+ uniqueStrings(d.crons,CRON,{max:10},`${label}.crons`);
+ req(d.crons.every(c=>c.length<=100),`${label}.crons: expression too long`);
+ req(Array.isArray(d.queueConsumers)&&d.queueConsumers.length<=10,`${label}.queueConsumers: expected 0..10 entries`);
+ for(const c of d.queueConsumers){
+  keys(c,['queue'],['maxBatchSize','maxRetries','deadLetterQueue'],`${label}.queueConsumers entry`);
+  req(matches(QUEUE_NAME,c.queue),`${label}.queueConsumers: invalid queue`);
+  req(!Object.hasOwn(c,'maxBatchSize')||safeInt(c.maxBatchSize,1,100),`${label}.queueConsumers: maxBatchSize must be 1..100`);
+  req(!Object.hasOwn(c,'maxRetries')||safeInt(c.maxRetries,0,100),`${label}.queueConsumers: maxRetries must be 0..100`);
+  req(!Object.hasOwn(c,'deadLetterQueue')||(matches(QUEUE_NAME,c.deadLetterQueue)&&c.deadLetterQueue!==c.queue),`${label}.queueConsumers: invalid deadLetterQueue`);
+ }
+ req(new Set(d.queueConsumers.map(c=>c.queue)).size===d.queueConsumers.length,`${label}.queueConsumers: duplicate queue`);
+ req(d.crons.length+d.queueConsumers.length>0,`${label}: omit declared when there is nothing to declare`);
+}
+
 export const RELEASE_MARKER_BINDING='RELEASE_MARKER';
 export function validateReleaseMarker(m,{runtime=false}={}){
  const label=SCHEMAS.marker;
@@ -253,7 +277,7 @@ export async function validateWorkerArtifactV2(a){
  keys(a,['schema','metadata','modules'],[],label);
  req(a.schema===SCHEMAS.workerV2,`${label}: wrong schema`);
  const m=a.metadata;
- keys(m,['main_module','compatibility_date','compatibility_flags','bindings'],['migrations','assets'],`${label}.metadata`);
+ keys(m,['main_module','compatibility_date','compatibility_flags','bindings'],['migrations','assets','declared'],`${label}.metadata`);
  req(m.main_module==='worker.mjs',`${label}: main_module must be worker.mjs`);
  req(Array.isArray(m.bindings)&&m.bindings.length<=100,`${label}: too many bindings`);
  const names=new Set(),v1=[];let assetBindings=0;
@@ -272,6 +296,7 @@ export async function validateWorkerArtifactV2(a){
  catch{deny(`${label}: compatibility fields or v1 binding rejected by worker-artifact/v1 rules`);}
  if(Object.hasOwn(m,'migrations'))doMigrations(m.migrations,`${label}.metadata.migrations`);
  if(Object.hasOwn(m,'assets'))assetsMetadata(m.assets,`${label}.metadata.assets`);
+ if(Object.hasOwn(m,'declared'))declaredTriggers(m.declared,`${label}.metadata.declared`);
  req(Array.isArray(a.modules)&&a.modules.length===1,`${label}: exactly one module`);
  const mod=a.modules[0];
  keys(mod,['name','type','content'],[],`${label}: module`);
@@ -310,7 +335,7 @@ export function validateMigrationsLedger(l){
 
 export function validateAuthorizationPolicy(p){
  const label=SCHEMAS.policy;
- keys(p,['schema','policyVersion','application','repository','repositoryId','releasePrefix','sourceCommit','releaseTag','signer','environments','expiresAt'],[],label);
+ keys(p,['schema','policyVersion','application','repository','repositoryId','releasePrefix','sourceCommit','releaseTag','signer','targets','environments','expiresAt'],[],label);
  req(p.schema===SCHEMAS.policy&&p.policyVersion===1,`${label}: wrong schema or policyVersion`);
  req(matches(APPLICATION_ID,p.application)&&matches(REPOSITORY,p.repository)&&positive(p.repositoryId),`${label}: invalid identity`);
  req(p.releasePrefix===`${p.application}/`,`${label}: releasePrefix must be <application>/`);
@@ -318,7 +343,19 @@ export function validateAuthorizationPolicy(p){
  keys(p.signer,['issuer','identity'],[],`${label}.signer`);
  req(p.signer.issuer===GITHUB_ISSUER,`${label}: signer issuer must be GitHub Actions OIDC`);
  req(typeof p.signer.identity==='string'&&p.signer.identity.startsWith('https://github.com/')&&WORKFLOW_REF.test(p.signer.identity.slice(19)),`${label}: signer identity must be a SHA-pinned workflow`);
+ // Per-target adapter and health/recovery contract tell admission and the deployer which
+ // checks apply; environment target lists must name only these targets.
+ req(object(p.targets),`${label}.targets: expected an object`);
+ const ids=Object.keys(p.targets);
+ req(ids.length>=1&&ids.length<=LIMITS.targets&&ids.every(id=>TARGET_ID.test(id)),`${label}.targets: expected 1..${LIMITS.targets} target ids`);
+ for(const id of ids){
+  const t=p.targets[id],worker=t?.adapter===ADAPTERS.worker;
+  req(object(t)&&Object.values(ADAPTERS).includes(t.adapter),`${label}.targets.${id}: unknown adapter`);
+  keys(t,['adapter',worker?'healthContract':'recoveryPolicy'],[],`${label}.targets.${id}`);
+  req(worker?HEALTH_CONTRACTS.includes(t.healthContract):t.recoveryPolicy==='forward-only',`${label}.targets.${id}: invalid contract`);
+ }
  environmentSet(p.environments,`${label}.environments`,true);
+ req(Object.values(p.environments).every(e=>e.targets.every(id=>ids.includes(id))),`${label}.environments: targets must be listed in targets`);
  return p;
 }
 
@@ -358,8 +395,8 @@ export function validateReleaseManifest(m){
   req(object(t)&&Object.values(ADAPTERS).includes(t.adapter),`${label}: unknown adapter`);
   const extra=t.adapter===ADAPTERS.worker?'healthContract':'recoveryPolicy';
   keys(t,['id','adapter','artifactPath','sha256','sizeBytes','dependsOn',extra],[],`${label}: target`);
-  req(matches(TARGET_ID,t.id)&&t.artifactPath===ARTIFACT_PATHS[t.adapter]&&matches(HEX64,t.sha256)&&safeInt(t.sizeBytes,1,LIMITS.bundleBytes),`${label}: invalid target ${t.id}`);
-  req(t.adapter===ADAPTERS.worker?t.healthContract==='http-release-marker/v1':t.recoveryPolicy==='forward-only',`${label}: invalid ${extra}`);
+  req(matches(TARGET_ID,t.id)&&t.artifactPath===`targets/${t.id}.zip`&&matches(HEX64,t.sha256)&&safeInt(t.sizeBytes,1,LIMITS.bundleBytes),`${label}: invalid target ${t.id}`);
+  req(t.adapter===ADAPTERS.worker?HEALTH_CONTRACTS.includes(t.healthContract):t.recoveryPolicy==='forward-only',`${label}: invalid ${extra}`);
  }
  req(new Set(m.targets.map(t=>t.artifactPath)).size===m.targets.length,`${label}: duplicate artifactPath`);
  dependencies(m.targets,label);

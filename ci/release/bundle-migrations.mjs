@@ -1,12 +1,12 @@
-// Packages a cloudflare-d1-migrate/v1 target as targets/migrations.zip:
+// Packages each cloudflare-d1-migrate/v1 target as targets/<target-id>.zip:
 //   ledger.json      migrations-ledger/v1
 //   NNNN_name.sql    exact bytes from the repository (never executed here)
 import {createHash} from 'node:crypto';
 import {join} from 'node:path';
-import {ADAPTERS,ARTIFACT_PATHS,LIMITS,SCHEMAS,canonicalBytes,validateMigrationsLedger} from '../../src/shared/release-contract.mjs';
+import {ADAPTERS,LIMITS,SCHEMAS,TARGET_ID,artifactPathFor,parseJson,canonicalBytes,validateMigrationsLedger} from '../../src/shared/release-contract.mjs';
 import {createZip} from './zip.mjs';
 import {loadApplication,targetOf} from './read-application.mjs';
-import {parseArgs,isMain,runCli,writeOnce,writeGithubOutput,resolveInside,readRegularFile,walkFiles} from './io.mjs';
+import {parseArgs,isMain,runCli,writeOnce,resolveInside,readRegularFile,walkFiles} from './io.mjs';
 
 const hex=bytes=>createHash('sha256').update(bytes).digest('hex');
 const FILE=/^(\d{4})(?:_[A-Za-z0-9_-]{1,64})?\.sql$/;
@@ -97,15 +97,23 @@ export function bundleMigrations({appRoot,application,targetId,outDir}){
  const {ledger,entries}=buildLedger(resolveInside(appRoot,target.build.migrationsDir,'migrations directory'),{binding:target.build.binding});
  const zip=createZip([{name:'ledger.json',data:canonicalBytes(ledger)},...entries]);
  if(zip.length>LIMITS.bundleBytes)throw Error('Migrations bundle exceeds size limit');
- const artifactPath=ARTIFACT_PATHS[ADAPTERS.d1];
+ const artifactPath=artifactPathFor(target.id);
  writeOnce(join(outDir,artifactPath),zip);
  return {target:target.id,artifactPath,sha256:hex(zip),sizeBytes:zip.length,migrations:ledger.migrations.length};
 }
 
+// --targets takes the JSON array emitted by read-application-manifest (may be empty).
+export function parseTargetList(value){
+ const ids=parseJson(value,{maxBytes:4096,label:'targets'});
+ if(!Array.isArray(ids)||ids.length>LIMITS.targets||!ids.every(id=>typeof id==='string'&&TARGET_ID.test(id))||new Set(ids).size!==ids.length)throw Error('targets must be a JSON array of unique target ids');
+ return ids;
+}
 export async function main(argv){
- const args=parseArgs(argv,{'app-root':{required:true},application:{required:true},target:{required:true,pattern:/^[a-z0-9-]{1,64}$/},'out-dir':{required:true},'github-output':{}});
- const result=bundleMigrations({appRoot:args['app-root'],application:loadApplication(args.application),targetId:args.target,outDir:args['out-dir']});
- writeGithubOutput(args['github-output'],{artifact_path:result.artifactPath,sha256:result.sha256});
- process.stdout.write(`${result.artifactPath} sha256=${result.sha256} migrations=${result.migrations}\n`);
+ const args=parseArgs(argv,{'app-root':{required:true},application:{required:true},targets:{required:true},'out-dir':{required:true}});
+ const application=loadApplication(args.application);
+ for(const targetId of parseTargetList(args.targets)){
+  const result=bundleMigrations({appRoot:args['app-root'],application,targetId,outDir:args['out-dir']});
+  process.stdout.write(`${result.artifactPath} sha256=${result.sha256} migrations=${result.migrations}\n`);
+ }
 }
 if(isMain(import.meta.url))runCli(main);

@@ -50,11 +50,14 @@ test('application-deployment/v1 accepts the contract shape and rejects hostile v
   'dot segment':a=>{a.targets[1].build.entry='./src/worker.ts';},
   'shell build command':a=>{a.targets[1].build.buildCommand='build && curl x';},
   'bad target id':a=>{a.targets[0].id='Bad_Id';},
-  'duplicate adapter':a=>{a.targets.push({...clone(a.targets[1]),id:'second-worker',dependsOn:[]});},
+  'duplicate target id':a=>{a.targets.push({...clone(a.targets[1]),dependsOn:[]});},
+  'target id with path characters':a=>{a.targets[1].id='../worker';},
   'bad environment ref':a=>{a.environments.staging.allowedRefs=['main'];},
   'approvals out of range':a=>{a.environments.production.requiredApprovals=99;},
   'repository id not integer':a=>{a.repositoryId='4242';},
   'unsupported recovery':a=>{a.targets[0].recoveryPolicy='rollback';},
+  'unknown health contract':a=>{a.targets[1].healthContract='tcp-ping/v1';},
+  'routeless target with assets':a=>{a.targets[1].healthContract='worker-version/v1';},
  };
  for(const [name,mutate] of Object.entries(cases)){const a=clone(app);mutate(a);denied(()=>validateApplication(a),undefined,name);}
 });
@@ -127,6 +130,7 @@ test('migrations-ledger/v1 enforces ordering, digests and expand/contract pairin
 function policy(){
  return {schema:'authorization-policy/v1',policyVersion:1,application:'demoapp',repository:'example-owner/demo-app',repositoryId:4242,releasePrefix:'demoapp/',
   sourceCommit:SOURCE_COMMIT,releaseTag:'v1.2.3',signer:{issuer:'https://token.actions.githubusercontent.com',identity:`https://github.com/example-owner/workflow_depot/.github/workflows/release.yml@${'e'.repeat(40)}`},
+  targets:{'demoapp-worker':{adapter:'cloudflare-worker/v1',healthContract:'http-release-marker/v1'},'demoapp-replicator':{adapter:'cloudflare-worker/v1',healthContract:'worker-version/v1'},'demoapp-d1-migrations':{adapter:'cloudflare-d1-migrate/v1',recoveryPolicy:'forward-only'}},
   environments:{staging:{allowedRefs:['refs/heads/main'],requiredApprovals:0,targets:['demoapp-worker']}},expiresAt:'2027-10-15T00:00:00Z'};
 }
 test('authorization-policy/v1 binds a SHA-pinned signer and the release prefix',()=>{
@@ -138,15 +142,21 @@ test('authorization-policy/v1 binds a SHA-pinned signer and the release prefix',
   'bad semver':p=>{p.releaseTag='v1.2';},
   'policy version':p=>{p.policyVersion=2;},
   'unknown key':p=>{p.allowAll=true;},
+  'environment names unlisted target':p=>{p.environments.staging.targets.push('ghost');},
+  'unknown health contract':p=>{p.targets['demoapp-worker'].healthContract='tcp-ping/v1';},
+  'worker with recovery policy':p=>{p.targets['demoapp-worker']={adapter:'cloudflare-worker/v1',recoveryPolicy:'forward-only'};},
+  'unknown target key':p=>{p.targets['demoapp-d1-migrations'].route='x';},
+  'missing targets':p=>{delete p.targets;},
+  'bad target id':p=>{p.targets['../x']={adapter:'cloudflare-d1-migrate/v1',recoveryPolicy:'forward-only'};},
  };
  for(const [name,mutate] of Object.entries(cases)){const p=policy();mutate(p);denied(()=>validateAuthorizationPolicy(p),undefined,name);}
 });
 
 test('release-checksums/v1 covers bundles and policy and renders SHA256SUMS',()=>{
- const c={schema:'release-checksums/v1',algorithm:'sha256',files:{'targets/worker.zip':{sha256:hex64('1'),sizeBytes:5},'authorization-policy.json':{sha256:hex64('2'),sizeBytes:6}}};
+ const c={schema:'release-checksums/v1',algorithm:'sha256',files:{'targets/demoapp-worker.zip':{sha256:hex64('1'),sizeBytes:5},'authorization-policy.json':{sha256:hex64('2'),sizeBytes:6}}};
  validateChecksums(c);
- assert.equal(renderSha256Sums(c),`${hex64('2')}  authorization-policy.json\n${hex64('1')}  targets/worker.zip\n`);
- for(const mutate of [c=>{c.files['../escape.zip']={sha256:hex64('3'),sizeBytes:1};},c=>{delete c.files['authorization-policy.json'];},c=>{c.algorithm='md5';},c=>{c.files['targets/worker.zip'].sizeBytes=0;}]){
+ assert.equal(renderSha256Sums(c),`${hex64('2')}  authorization-policy.json\n${hex64('1')}  targets/demoapp-worker.zip\n`);
+ for(const mutate of [c=>{c.files['../escape.zip']={sha256:hex64('3'),sizeBytes:1};},c=>{delete c.files['authorization-policy.json'];},c=>{c.algorithm='md5';},c=>{c.files['targets/demoapp-worker.zip'].sizeBytes=0;}]){
   const x=clone(c);mutate(x);denied(()=>validateChecksums(x));
  }
 });
@@ -155,12 +165,13 @@ function manifest(){
  return {schema:'release-manifest/v2',application:'demoapp',repository:'example-owner/demo-app',repositoryId:4242,releaseTag:'v1.0.0',sourceCommit:SOURCE_COMMIT,createdAt:'2026-10-15T00:00:00Z',
   builder:{workflow:`example-owner/workflow_depot/.github/workflows/release.yml@${'e'.repeat(40)}`,runId:'7',runAttempt:'1'},
   artifact:{path:'release.zip',sha256:hex64('a'),sizeBytes:10,mediaType:'application/zip'},
-  targets:[{id:'demoapp-d1-migrations',adapter:'cloudflare-d1-migrate/v1',artifactPath:'targets/migrations.zip',sha256:hex64('b'),sizeBytes:1,dependsOn:[],recoveryPolicy:'forward-only'},
-   {id:'demoapp-worker',adapter:'cloudflare-worker/v1',artifactPath:'targets/worker.zip',sha256:hex64('c'),sizeBytes:1,dependsOn:['demoapp-d1-migrations'],healthContract:'http-release-marker/v1'}],
+  targets:[{id:'demoapp-d1-migrations',adapter:'cloudflare-d1-migrate/v1',artifactPath:'targets/demoapp-d1-migrations.zip',sha256:hex64('b'),sizeBytes:1,dependsOn:[],recoveryPolicy:'forward-only'},
+   {id:'demoapp-worker',adapter:'cloudflare-worker/v1',artifactPath:'targets/demoapp-worker.zip',sha256:hex64('c'),sizeBytes:1,dependsOn:['demoapp-d1-migrations'],healthContract:'http-release-marker/v1'}],
   authorizationPolicy:{path:'authorization-policy.json',sha256:hex64('d')},checksums:{path:'checksums.json',sha256:hex64('e')}};
 }
 test('release-manifest/v2 rejects bad semver, unknown keys, cycles and redirected artifact paths',()=>{
  validateReleaseManifest(manifest());
+ const routeless=manifest();routeless.targets[1].healthContract='worker-version/v1';validateReleaseManifest(routeless);
  const cases={
   'bad semver':m=>{m.releaseTag='1.0.0';},
   'prerelease tag':m=>{m.releaseTag='v1.0.0-rc.1';},
@@ -169,7 +180,8 @@ test('release-manifest/v2 rejects bad semver, unknown keys, cycles and redirecte
   'unknown target key':m=>{m.targets[0].accountId='x';},
   'cycle':m=>{m.targets[0].dependsOn=['demoapp-worker'];},
   'artifact path redirect':m=>{m.targets[1].artifactPath='targets/../worker.zip';},
-  'wrong adapter path':m=>{m.targets[1].artifactPath='targets/migrations.zip';},
+  'path of another target':m=>{m.targets[1].artifactPath='targets/demoapp-d1-migrations.zip';},
+  'fixed legacy path':m=>{m.targets[1].artifactPath='targets/worker.zip';},
   'branch builder':m=>{m.builder.workflow='example-owner/workflow_depot/.github/workflows/release.yml@main';},
   'unknown adapter':m=>{m.targets[0].adapter='ssh-deploy/v1';},
   'short sha':m=>{m.sourceCommit='abc123';},

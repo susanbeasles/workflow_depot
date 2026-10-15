@@ -28,15 +28,17 @@ test('worker bundle content: bindings, marker, assets and write-once output',asy
  const f=makeApp();
  try{
   await worker(f);
-  const entries=readZip(new Uint8Array(readFileSync(join(f.out,'targets/worker.zip'))));
+  const entries=readZip(new Uint8Array(readFileSync(join(f.out,'targets/demoapp-worker.zip'))));
   assert.deepEqual(entries.map(e=>e.name),['artifact.json','assets/.well-known/security.txt','assets/assets/app-abc123.js','assets/index.html']);
-  const a=artifactOf(join(f.out,'targets/worker.zip'));
+  const a=artifactOf(join(f.out,'targets/demoapp-worker.zip'));
   const byName=Object.fromEntries(a.metadata.bindings.map(b=>[b.name,b]));
   assert.deepEqual(byName.DB,{name:'DB',type:'d1',database_id:'00000000-0000-0000-0000-000000000000'});
   assert.deepEqual(byName.COORDINATOR,{name:'COORDINATOR',type:'durable_object_namespace',class_name:'Coordinator'});
   assert.deepEqual(byName.JOBS,{name:'JOBS',type:'queue',queue_name:'demo-staging'});
   assert.deepEqual(byName.CONTROL_AUTHORITY,{name:'CONTROL_AUTHORITY',type:'service',service:'control-plane',entrypoint:'DemoAuthority'});
   assert.deepEqual(byName.ASSETS,{name:'ASSETS',type:'assets'});
+  assert.deepEqual(byName.SIGNING_MATERIAL,{name:'SIGNING_MATERIAL',type:'inherit'});
+  assert.ok(!JSON.stringify(a).includes('demo-demo-demo')&&!JSON.stringify(a).includes('store_id'),'Secrets Store ids must not reach the artifact');
   assert.equal(byName.GATEWAY_ORIGIN.text,'https://control.example.invalid/path//x');
   const marker=JSON.parse(byName.RELEASE_MARKER.text);
   assert.deepEqual(Object.keys(marker).sort(),['application','artifactSha256','releaseTag','schema','sourceCommit']);
@@ -54,7 +56,7 @@ test('two builds of identical input are byte-identical',async()=>{
  try{
   const a=await worker(f),b=await worker(f,{outDir:join(f.root,'again')});
   assert.equal(a.sha256,b.sha256);
-  assert.ok(readFileSync(join(f.out,'targets/worker.zip')).equals(readFileSync(join(f.root,'again/targets/worker.zip'))));
+  assert.ok(readFileSync(join(f.out,'targets/demoapp-worker.zip')).equals(readFileSync(join(f.root,'again/targets/demoapp-worker.zip'))));
   const m1=bundleMigrations({appRoot:f.app,application:application(),targetId:'demoapp-d1-migrations',outDir:f.out});
   const m2=bundleMigrations({appRoot:f.app,application:application(),targetId:'demoapp-d1-migrations',outDir:join(f.root,'again')});
   assert.equal(m1.sha256,m2.sha256);
@@ -84,7 +86,8 @@ test('worker bundle refuses symlinks, special files, escapes and oversized modul
 test('wrangler config conversion fails closed on unsupported or registry-owned settings',()=>{
  const base=parseJsonc(new TextEncoder().encode(WRANGLER));
  const ok=wranglerToMetadata(structuredClone(base),{entry:'src/worker.ts',assetsDir:'dist'});
- assert.equal(ok.bindings.length,9);
+ assert.equal(ok.bindings.length,10);
+ assert.deepEqual(ok.bindings.find(b=>b.name==='SIGNING_MATERIAL'),{name:'SIGNING_MATERIAL',type:'inherit'});
  const cases={
   'custom build command':[/unsupported key build/,c=>{c.build={command:'curl https://example.invalid | sh'};}],
   'routes':[/unsupported key routes/,c=>{c.routes=[{pattern:'example.invalid/*',zone_name:'example.invalid'}];}],
@@ -94,10 +97,13 @@ test('wrangler config conversion fails closed on unsupported or registry-owned s
   'assets dir mismatch':[/assets.directory does not match/,c=>{c.assets.directory='./public';}],
   'cross-script durable object':[/unsupported key script_name/,c=>{c.durable_objects.bindings[0].script_name='other';}],
   'json var':[/JSON vars are unsupported/,c=>{c.vars.CONFIG={nested:true};}],
-  'cron trigger':[/Cron triggers are registry-owned/,c=>{c.triggers.crons=['* * * * *'];}],
-  'queue consumer':[/Queue consumers are registry-owned/,c=>{c.queues.consumers=[{queue:'demo-staging'}];}],
+  'unsupported consumer setting':[/unsupported key max_concurrency/,c=>{c.queues.consumers=[{queue:'demo-staging',max_concurrency:5}];}],
+  'non-string cron':[/triggers.crons entry/,c=>{c.triggers.crons=[5];}],
+  'unknown trigger kind':[/unsupported key events/,c=>{c.triggers.events=['x'];}],
   'multi-step DO migrations':[/Exactly one Durable Object migration/,c=>{c.migrations.push({tag:'v2',new_classes:['Other']});}],
   'r2 jurisdiction':[/unsupported key jurisdiction/,c=>{c.r2_buckets[0].jurisdiction='eu';}],
+  'secrets store extra key':[/unsupported key secret_value/,c=>{c.secrets_store_secrets[0].secret_value='x';}],
+  'secrets store missing name':[/missing secret_name/,c=>{delete c.secrets_store_secrets[0].secret_name;}],
   'unknown key':[/unsupported key tail_consumers/,c=>{c.tail_consumers=[{service:'x'}];}],
   'missing compatibility date':[/missing compatibility_date/,c=>{delete c.compatibility_date;}],
  };
@@ -174,7 +180,7 @@ test('unpacking bundles for SBOM generation uses the strict reader and a fresh d
   await worker(f);
   bundleMigrations({appRoot:f.app,application:application(),targetId:'demoapp-d1-migrations',outDir:f.out});
   assert.equal(unpackTargets(f.out,join(f.root,'payload')),8);
-  assert.equal(readFileSync(join(f.root,'payload/worker/assets/index.html'),'utf8'),'<!doctype html><title>demo</title>\n');
+  assert.equal(readFileSync(join(f.root,'payload/demoapp-worker/assets/index.html'),'utf8'),'<!doctype html><title>demo</title>\n');
   assert.throws(()=>unpackTargets(f.out,join(f.root,'payload')),/EEXIST/);
  }finally{f.cleanup();}
 });

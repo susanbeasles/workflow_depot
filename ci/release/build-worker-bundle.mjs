@@ -1,13 +1,15 @@
-// Packages one cloudflare-worker/v1 target as targets/worker.zip:
+// Packages one cloudflare-worker/v1 target as targets/<target-id>.zip:
 //   artifact.json   workflow-depot-worker-artifact/v2 (module inline, asset digests only)
 //   assets/<path>   static asset bytes
 // The module comes from `wrangler deploy --dry-run --outdir`, which the composite
 // action runs; bindings come from the wrangler config and are claims the deployer
-// re-resolves against the Terraform registry. Nothing here executes app code.
+// re-resolves against the Terraform registry. Cron triggers and queue consumers are
+// infrastructure-owned: they are recorded under metadata.declared for comparison with
+// the registry and never act as authority. Nothing here executes app code.
 import {createHash} from 'node:crypto';
 import {readdirSync,lstatSync} from 'node:fs';
 import {join} from 'node:path';
-import {ADAPTERS,ARTIFACT_PATHS,LIMITS,SCHEMAS,RELEASE_TAG,SHA40,RELEASE_MARKER_BINDING,canonical,canonicalBytes,isRelativePath,isAssetPath,validateWorkerArtifactV2} from '../../src/shared/release-contract.mjs';
+import {ADAPTERS,LIMITS,artifactPathFor,SCHEMAS,RELEASE_TAG,SHA40,RELEASE_MARKER_BINDING,canonical,canonicalBytes,isRelativePath,isAssetPath,validateWorkerArtifactV2} from '../../src/shared/release-contract.mjs';
 import {createZip} from './zip.mjs';
 import {parseJsonc} from './jsonc.mjs';
 import {loadApplication,targetOf} from './read-application.mjs';
@@ -34,17 +36,20 @@ export function normalizeConfigPath(value,label){
 }
 
 // Keys consumed by wrangler at bundle time, or owned by Terraform/the deployer
-// (ingress, observability, schedules); they never reach the artifact.
-const CONVERTED=['name','main','compatibility_date','compatibility_flags','vars','kv_namespaces','d1_databases','r2_buckets','durable_objects','services','queues','assets','migrations'];
+// (ingress, observability); they never reach the artifact.
+const CONVERTED=['name','main','compatibility_date','compatibility_flags','vars','kv_namespaces','d1_databases','r2_buckets','durable_objects','services','queues','assets','migrations','secrets_store_secrets'];
 const IGNORED=['$schema','observability','workers_dev','preview_urls','triggers','minify','keep_names','upload_source_maps','tsconfig','define','alias'];
 
-export function wranglerToMetadata(config,{entry,assetsDir}){
+export function wranglerToMetadata(config,{entry,assetsDir,healthContract='http-release-marker/v1'}){
  only(config,['main','compatibility_date'],[...CONVERTED,...IGNORED],'wrangler config');
+ // worker-version/v1 is proven by the active version, so the Worker must be unreachable by URL.
+ if(healthContract==='worker-version/v1'&&(config.workers_dev!==false||config.preview_urls===true||Object.hasOwn(config,'assets')))throw Error('worker-version/v1 targets must set workers_dev false, keep preview_urls off and declare no assets');
  if(Object.hasOwn(config,'name'))string(config.name,'wrangler name');
  if(normalizeConfigPath(config.main,'wrangler main')!==entry)throw Error('wrangler main does not match the application target entry');
+ const declared={crons:[],queueConsumers:[]};
  if(Object.hasOwn(config,'triggers')){
   only(config.triggers,[],['crons'],'wrangler triggers');
-  if(list(config.triggers.crons,'wrangler triggers.crons').length)throw Error('Cron triggers are registry-owned and not part of the artifact');
+  declared.crons=list(config.triggers.crons,'wrangler triggers.crons').map(c=>string(c,'wrangler triggers.crons entry'));
  }
  const bindings=[];
  if(Object.hasOwn(config,'vars')){
@@ -58,13 +63,25 @@ export function wranglerToMetadata(config,{entry,assetsDir}){
   only(config.durable_objects,[],['bindings'],'durable_objects');
   for(const d of list(config.durable_objects.bindings,'durable_objects.bindings')){only(d,['name','class_name'],[],'durable object binding (cross-script bindings are unsupported)');bindings.push({name:d.name,type:'durable_object_namespace',class_name:d.class_name});}
  }
+ // Secrets Store bindings are owned by the root provisioning path; the artifact only
+ // names them as inherited bindings (store_id and secret_name are not carried).
+ for(const sec of list(config.secrets_store_secrets,'secrets_store_secrets')){
+  only(sec,['binding','store_id','secret_name'],[],'secrets_store_secrets entry');
+  string(sec.store_id,'secrets_store_secrets store_id');string(sec.secret_name,'secrets_store_secrets secret_name');
+  bindings.push({name:sec.binding,type:'inherit'});
+ }
  for(const s of list(config.services,'services')){only(s,['binding','service'],['entrypoint','remote'],'services entry');bindings.push({name:s.binding,type:'service',service:s.service,...(Object.hasOwn(s,'entrypoint')?{entrypoint:s.entrypoint}:{})});}
  if(Object.hasOwn(config,'queues')){
   only(config.queues,[],['producers','consumers'],'queues');
-  if(list(config.queues.consumers,'queues.consumers').length)throw Error('Queue consumers are registry-owned and not part of the artifact');
+  for(const c of list(config.queues.consumers,'queues.consumers')){
+   only(c,['queue'],['max_batch_size','max_retries','dead_letter_queue'],'queue consumer');
+   declared.queueConsumers.push({queue:c.queue,...(Object.hasOwn(c,'max_batch_size')?{maxBatchSize:c.max_batch_size}:{}),
+    ...(Object.hasOwn(c,'max_retries')?{maxRetries:c.max_retries}:{}),...(Object.hasOwn(c,'dead_letter_queue')?{deadLetterQueue:c.dead_letter_queue}:{})});
+  }
   for(const q of list(config.queues.producers,'queues.producers')){only(q,['binding','queue'],['remote'],'queue producer');bindings.push({name:q.binding,type:'queue',queue_name:q.queue});}
  }
  const metadata={main_module:'worker.mjs',compatibility_date:config.compatibility_date,compatibility_flags:config.compatibility_flags??[]};
+ if(declared.crons.length||declared.queueConsumers.length)metadata.declared=declared;
  if(Object.hasOwn(config,'migrations')){
   const steps=list(config.migrations,'migrations');
   if(steps.length!==1)throw Error('Exactly one Durable Object migration step is supported by worker-artifact/v2');
@@ -122,7 +139,7 @@ export function planTarget({appRoot,application,targetId}){
  const configPath=target.build.wranglerConfig;
  if(!/\.jsonc?$/.test(configPath))throw Error('Only wrangler.json/wrangler.jsonc configs are supported');
  const config=parseJsonc(readRegularFile(resolveInside(appRoot,configPath,'wrangler config'),LIMITS.jsonBytes,'wrangler config'),{maxBytes:LIMITS.jsonBytes,label:'wrangler config'});
- const converted=wranglerToMetadata(config,{entry:target.build.entry,assetsDir:target.build.assetsDir});
+ const converted=wranglerToMetadata(config,{entry:target.build.entry,assetsDir:target.build.assetsDir,healthContract:target.healthContract});
  return {target,config,converted};
 }
 
@@ -141,7 +158,7 @@ export async function buildWorkerBundle({appRoot,application,targetId,wranglerOu
  const artifact=await validateWorkerArtifactV2({schema:SCHEMAS.workerV2,metadata,modules:[{name:'worker.mjs',type:'esm',content:module.content}]});
  const zip=createZip([{name:'artifact.json',data:canonicalBytes(artifact)},...assets.map(a=>({name:`assets/${a.path}`,data:a.data}))]);
  if(zip.length>LIMITS.bundleBytes)throw Error('Worker bundle exceeds size limit');
- const artifactPath=ARTIFACT_PATHS[ADAPTERS.worker];
+ const artifactPath=artifactPathFor(target.id);
  writeOnce(join(outDir,artifactPath),zip);
  return {target:target.id,artifactPath,sha256:hex(zip),sizeBytes:zip.length,moduleSha256:marker.artifactSha256};
 }

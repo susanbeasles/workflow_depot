@@ -23,8 +23,9 @@ export async function main(argv){
  const args=parseArgs(argv,{'app-root':{required:true},manifest:{default:'deployment/application.json'},context:{required:true},out:{required:true},'github-output':{}});
  const application=readApplication(args['app-root'],args.manifest,loadContext(args.context));
  writeCanonical(args.out,application);
- const idOf=adapter=>application.targets.find(t=>t.adapter===adapter)?.id||'';
- writeGithubOutput(args['github-output'],{application:application.application,worker_target:idOf(ADAPTERS.worker),migrations_target:idOf(ADAPTERS.d1)});
+ // JSON arrays of validated target ids drive the worker matrix and the migrations loop.
+ const idsOf=adapter=>JSON.stringify(application.targets.filter(t=>t.adapter===adapter).map(t=>t.id));
+ writeGithubOutput(args['github-output'],{application:application.application,worker_targets:idsOf(ADAPTERS.worker),migrations_targets:idsOf(ADAPTERS.d1)});
  process.stdout.write(`application ${application.application}: ${application.targets.map(t=>t.id).join(', ')}\n`);
 }
 if(isMain(import.meta.url))runCli(main);

@@ -133,8 +133,8 @@ export async function verifyRelease(releaseDir,{stage='unsigned',layout='build',
  const policy=strictDocument(policyBytes,validateAuthorizationPolicy,'authorization-policy.json');
  for(const key of ['application','repository','repositoryId','sourceCommit','releaseTag'])check(policy[key]===manifest[key],`authorization policy ${key} does not match release.meta.json`);
  check(policy.signer.identity===signerIdentity(manifest.builder.workflow),'authorization policy signer does not match the release builder workflow');
- const ids=manifest.targets.map(t=>t.id);
- check(Object.values(policy.environments).every(e=>e.targets.every(id=>ids.includes(id))),'authorization policy names targets outside the release');
+ const contractOf=t=>canonical(t.adapter===ADAPTERS.worker?{adapter:t.adapter,healthContract:t.healthContract}:{adapter:t.adapter,recoveryPolicy:t.recoveryPolicy});
+ check(Object.keys(policy.targets).length===manifest.targets.length&&manifest.targets.every(t=>Object.hasOwn(policy.targets,t.id)&&canonical(policy.targets[t.id])===contractOf(t)),'authorization policy targets do not match release.meta.json targets');
 
  const summary=[];
  for(const t of manifest.targets){

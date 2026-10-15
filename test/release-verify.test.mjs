@@ -43,7 +43,7 @@ test('a freshly built release verifies, including against the application manife
   assert.equal(result.builderWorkflow,`${DEPOT.repository}/.github/workflows/release.yml@${DEPOT.sha}`);
   assert.deepEqual(result.targets.map(t=>t.id),['demoapp-d1-migrations','demoapp-worker']);
   const manifest=json(join(f.out,'release.meta.json'));
-  assert.deepEqual(readZip(new Uint8Array(readFileSync(join(f.out,'release.zip')))).map(e=>e.name),['authorization-policy.json','checksums.json','sbom.cdx.json','sbom.spdx.json','targets/migrations.zip','targets/worker.zip']);
+  assert.deepEqual(readZip(new Uint8Array(readFileSync(join(f.out,'release.zip')))).map(e=>e.name),['authorization-policy.json','checksums.json','sbom.cdx.json','sbom.spdx.json','targets/demoapp-d1-migrations.zip','targets/demoapp-worker.zip']);
   assert.equal(manifest.artifact.sha256,hex(readFileSync(join(f.out,'release.zip'))));
   const policy=json(join(f.out,'authorization-policy.json'));
   assert.equal(policy.signer.identity,`https://github.com/${manifest.builder.workflow}`);
@@ -62,8 +62,8 @@ test('release.zip is reproducible from identical inputs',async()=>{
 
 test('tampering anywhere in the release is detected',async()=>{
  const cases={
-  'tampered bundle byte':[/checksum mismatch: targets\/worker.zip/,f=>{const p=join(f.out,'targets/worker.zip'),b=readFileSync(p);b[40]^=1;writeFileSync(p,b);}],
-  'tampered manifest target digest':[/digest mismatch for targets\/worker.zip/,f=>{const m=json(join(f.out,'release.meta.json'));m.targets[1].sha256='0'.repeat(64);writeFileSync(join(f.out,'release.meta.json'),canonicalBytes(m));}],
+  'tampered bundle byte':[/checksum mismatch: targets\/demoapp-worker.zip/,f=>{const p=join(f.out,'targets/demoapp-worker.zip'),b=readFileSync(p);b[40]^=1;writeFileSync(p,b);}],
+  'tampered manifest target digest':[/digest mismatch for targets\/demoapp-worker.zip/,f=>{const m=json(join(f.out,'release.meta.json'));m.targets[1].sha256='0'.repeat(64);writeFileSync(join(f.out,'release.meta.json'),canonicalBytes(m));}],
   'manifest/checksums mismatch':[/checksums digest mismatch/,f=>{const m=json(join(f.out,'release.meta.json'));m.checksums.sha256='0'.repeat(64);writeFileSync(join(f.out,'release.meta.json'),canonicalBytes(m));}],
   'tampered release.zip digest':[/release.zip digest/,f=>{const m=json(join(f.out,'release.meta.json'));m.artifact.sha256='1'.repeat(64);writeFileSync(join(f.out,'release.meta.json'),canonicalBytes(m));}],
   'policy digest mismatch':[/authorization policy digest mismatch/,f=>{const m=json(join(f.out,'release.meta.json'));m.authorizationPolicy.sha256='2'.repeat(64);writeFileSync(join(f.out,'release.meta.json'),canonicalBytes(m));}],
@@ -84,12 +84,18 @@ test('tampering anywhere in the release is detected',async()=>{
    const raw=readZip(new Uint8Array(zip)).map(e=>e.name==='checksums.json'?{name:e.name,data:new Uint8Array(readFileSync(join(f.out,'checksums.json')))}:e);
    writeFileSync(join(f.out,'release.zip'),createZip(raw));
    write(f.out,'release.meta.json',canonicalBytes(releaseManifest({releaseDir:f.out,application:application(),context:context(),depotRepository:DEPOT.repository,depotSha:DEPOT.sha,createdAt:CREATED_AT})));}],
-  'unlisted asset smuggled into worker bundle':[/asset entries do not match/,f=>{rezip(join(f.out,'targets/worker.zip'),e=>[...e,{name:'assets/evil.js',data:new TextEncoder().encode('steal()')}]);reseal(f.out);}],
-  'asset bytes swapped':[/asset digest mismatch: index.html/,f=>{rezip(join(f.out,'targets/worker.zip'),e=>e.map(x=>x.name==='assets/index.html'?{name:x.name,data:new TextEncoder().encode('<script>evil()</script>')}:x));reseal(f.out);}],
-  'migration edited without ledger':[/migration digest mismatch: 0002_expand.sql/,f=>{rezip(join(f.out,'targets/migrations.zip'),e=>e.map(x=>x.name==='0002_expand.sql'?{name:x.name,data:new TextEncoder().encode('DROP TABLE records;')}:x));reseal(f.out);}],
-  'ledger statement count forged':[/ledger entry disagrees/,f=>{rezip(join(f.out,'targets/migrations.zip'),e=>e.map(x=>{if(x.name!=='ledger.json')return x;const l=JSON.parse(new TextDecoder().decode(x.data));l.migrations[0].statements=9;return {name:x.name,data:canonicalBytes(l)};}));reseal(f.out);}],
-  'worker artifact schema forged':[/wrong schema/,f=>{rezip(join(f.out,'targets/worker.zip'),e=>e.map(x=>{if(x.name!=='artifact.json')return x;const a=JSON.parse(new TextDecoder().decode(x.data));a.schema='workflow-depot-worker-artifact/v9';return {name:x.name,data:canonicalBytes(a)};}));reseal(f.out);}],
-  'decompression bomb inside bundle':[/ratio exceeds 100x/,f=>{writeFileSync(join(f.out,'targets/worker.zip'),bombZip());reseal(f.out);}],
+  'unlisted asset smuggled into worker bundle':[/asset entries do not match/,f=>{rezip(join(f.out,'targets/demoapp-worker.zip'),e=>[...e,{name:'assets/evil.js',data:new TextEncoder().encode('steal()')}]);reseal(f.out);}],
+  'asset bytes swapped':[/asset digest mismatch: index.html/,f=>{rezip(join(f.out,'targets/demoapp-worker.zip'),e=>e.map(x=>x.name==='assets/index.html'?{name:x.name,data:new TextEncoder().encode('<script>evil()</script>')}:x));reseal(f.out);}],
+  'migration edited without ledger':[/migration digest mismatch: 0002_expand.sql/,f=>{rezip(join(f.out,'targets/demoapp-d1-migrations.zip'),e=>e.map(x=>x.name==='0002_expand.sql'?{name:x.name,data:new TextEncoder().encode('DROP TABLE records;')}:x));reseal(f.out);}],
+  'ledger statement count forged':[/ledger entry disagrees/,f=>{rezip(join(f.out,'targets/demoapp-d1-migrations.zip'),e=>e.map(x=>{if(x.name!=='ledger.json')return x;const l=JSON.parse(new TextDecoder().decode(x.data));l.migrations[0].statements=9;return {name:x.name,data:canonicalBytes(l)};}));reseal(f.out);}],
+  'worker artifact schema forged':[/wrong schema/,f=>{rezip(join(f.out,'targets/demoapp-worker.zip'),e=>e.map(x=>{if(x.name!=='artifact.json')return x;const a=JSON.parse(new TextDecoder().decode(x.data));a.schema='workflow-depot-worker-artifact/v9';return {name:x.name,data:canonicalBytes(a)};}));reseal(f.out);}],
+  'policy health contract forged':[/authorization policy targets do not match/,f=>{
+   const p=json(join(f.out,'authorization-policy.json'));p.targets['demoapp-worker'].healthContract='worker-version/v1';
+   writeFileSync(join(f.out,'authorization-policy.json'),canonicalBytes(p));reseal(f.out);}],
+  'policy drops a target':[/authorization policy targets do not match/,f=>{
+   const p=json(join(f.out,'authorization-policy.json'));delete p.targets['demoapp-d1-migrations'];for(const e of Object.values(p.environments))e.targets=e.targets.filter(t=>t!=='demoapp-d1-migrations');
+   writeFileSync(join(f.out,'authorization-policy.json'),canonicalBytes(p));reseal(f.out);}],
+  'decompression bomb inside bundle':[/ratio exceeds 100x/,f=>{writeFileSync(join(f.out,'targets/demoapp-worker.zip'),bombZip());reseal(f.out);}],
  };
  for(const [name,[reason,mutate]] of Object.entries(cases)){
   const f=makeApp();
@@ -161,9 +167,9 @@ test('published layout verifies the GitHub Release asset set without loose bundl
   const result=await verifyRelease(assets,{stage:'signed',layout:'published',application:application()});
   assert.deepEqual(result.targets.map(t=>t.id),['demoapp-d1-migrations','demoapp-worker']);
   await assert.rejects(()=>verifyRelease(assets,{stage:'unsigned',layout:'published'}),/layout must be/);
-  await assert.rejects(()=>verifyRelease(assets,{stage:'signed'}),/missing: targets\/migrations.zip, targets\/worker.zip/);
-  write(assets,'targets/worker.zip',readFileSync(join(f.out,'targets/worker.zip')));
-  await assert.rejects(()=>verifyRelease(assets,{stage:'signed',layout:'published'}),/unexpected: targets\/worker.zip/);
+  await assert.rejects(()=>verifyRelease(assets,{stage:'signed'}),/missing: targets\/demoapp-d1-migrations.zip, targets\/demoapp-worker.zip/);
+  write(assets,'targets/demoapp-worker.zip',readFileSync(join(f.out,'targets/demoapp-worker.zip')));
+  await assert.rejects(()=>verifyRelease(assets,{stage:'signed',layout:'published'}),/unexpected: targets\/demoapp-worker.zip/);
   rmSync(join(assets,'targets'),{recursive:true});
   const zip=readFileSync(join(assets,'release.zip'));zip[zip.length-30]^=1;writeFileSync(join(assets,'release.zip'),zip);
   await assert.rejects(()=>verifyRelease(assets,{stage:'signed',layout:'published'}),/release.zip digest does not match/);
