@@ -1074,7 +1074,8 @@ jobs:
     # Stage 7, only after stage 6 published a release, one leg per registered target. request-deployment.yml
     # itself refuses anything but a main push.
     needs: [config, release]
-    if: needs.release.outputs.released == 'true' && needs.config.outputs.deploy_targets != '[]'
+    # request-deployment.yml accepts only refs/heads/main; tag releases skip stage 7.
+    if: github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true' && needs.config.outputs.deploy_targets != '[]'
     strategy:
       fail-fast: false
       matrix:

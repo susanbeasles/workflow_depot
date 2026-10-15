@@ -251,7 +251,7 @@ test('release runs only on main and vX.Y.Z pushes after build; deploy only after
     wf.jobs.release.if.replace(/\s+/g, ' ').trim(),
     "github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && needs.config.outputs.release == 'true'",
   );
-  assert.equal(wf.jobs.deploy.if, "needs.release.outputs.released == 'true' && needs.config.outputs.deploy_targets != '[]'");
+  assert.equal(wf.jobs.deploy.if, "github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true' && needs.config.outputs.deploy_targets != '[]'");
   for (const job of ['release', 'deploy', 'shadow', 'promote', 'infra-apply']) assert.ok(!/always\(\)|failure\(\)|cancelled\(\)/.test(wf.jobs[job].if), `${job} keeps the implicit success() of its needs`);
 });
 

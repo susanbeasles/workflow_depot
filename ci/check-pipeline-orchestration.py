@@ -114,7 +114,7 @@ assert " ".join(jobs["release"]["if"].split()) == (
     "startsWith(github.ref, 'refs/tags/v')) && needs.config.outputs.release == 'true'"
 )
 assert jobs["deploy"]["if"] == (
-    "needs.release.outputs.released == 'true' && needs.config.outputs.deploy_targets != '[]'"
+    "github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true' && needs.config.outputs.deploy_targets != '[]'"
 )
 assert "needs.config.outputs.ecosystem == 'terraform'" in jobs["infra-apply"]["if"]
 assert "refs/heads/main" in jobs["infra-apply"]["if"]
