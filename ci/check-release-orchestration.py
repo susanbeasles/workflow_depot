@@ -24,7 +24,6 @@ ALLOWED_PINS = {
     "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1",
     "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
     "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
-    "sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6",
     "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8",
 }
 REQUIRED_ACTIONS = [

@@ -35,6 +35,11 @@ def adapt(original):
  text=text[:pos]+guard+text[pos:]
  start=text.index('\n  codeql:');pos=text.index(addition,start)+len(addition)
  text=text[:pos]+'      - name: Apply owned CodeQL Advanced configuration\n        run: python3 .security-depot/ci/materialize-codeql.py\n'+text[pos:]
+ # Callers' Actions policy allows only owner and GitHub actions: install cosign from the
+ # SHA-256 pinned tool registry instead of the third-party sigstore/cosign-installer.
+ installer='      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2\n'
+ assert text.count(installer)==1
+ text=text.replace(installer,'      # cosign comes from the tool registry (SHA-256 pinned, fail closed), not a third-party\n      # action: callers\' Actions policy allows only owner and GitHub actions.\n      - uses: ./.security-depot/.github/actions/install-tool\n        with: { tool: cosign }\n')
  return text
 if __name__=='__main__':
  import pathlib
