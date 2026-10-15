@@ -76,7 +76,7 @@ test('every job: ubuntu-24.04, timeout-minutes, explicit minimal permissions', (
     'lint-test': { contents: 'read' },
     quality: { contents: 'read' },
     security: { contents: 'read' },
-    build: { contents: 'read', 'id-token': 'write', attestations: 'write' },
+    build: { contents: 'read' },
     shadow: { 'id-token': 'write' },
     promote: { 'id-token': 'write' },
   };
@@ -95,7 +95,7 @@ test('every uses: is pinned to a full 40-hex SHA with a version comment', () => 
 });
 
 test('only the allowed actions are used', () => {
-  const ok = new Set(['actions/checkout', 'actions/setup-node', 'actions/upload-artifact', 'actions/attest-build-provenance']);
+  const ok = new Set(['actions/checkout', 'actions/setup-node', 'actions/upload-artifact']);
   for (const { job, step } of allSteps()) if (step.uses !== undefined) assert.ok(ok.has(step.uses.split('@')[0]), `${job}: ${step.uses}`);
 });
 
@@ -128,8 +128,7 @@ test('caller commands reach the shell only through env and are run, not interpol
   assert.equal(inputs.test.default, 'npm test');
   assert.equal(inputs.build.default, 'npm run build --if-present');
   assert.equal(inputs['artifact-path'].default, '');
-  assert.equal(inputs['require-attestation'].type, 'boolean');
-  assert.equal(inputs['require-attestation'].default, 'true');
+  assert.equal(inputs['require-attestation'], undefined, 'GitHub attestations are not used');
 });
 
 test('shadow runs only for pull_request into main; promote only for push to shadow/pr-*', () => {
@@ -158,13 +157,11 @@ test('shadow and promote run the request actions at the workflow_depot commit pi
   assert.equal(wf.jobs.promote.steps[2].env.INPUT_ARTIFACT_DIGEST, '${{ needs.build.outputs.artifact_digest }}');
 });
 
-test('build outputs artifact_digest, uploads it and attests it', () => {
+test('build outputs artifact_digest and uploads it, with no GitHub attestation', () => {
   const build = wf.jobs.build;
   assert.equal(build.outputs.artifact_digest, '${{ steps.package.outputs.artifact_digest }}');
   assert.equal(wf.on.workflow_call.outputs.artifact_digest.value, '${{ jobs.build.outputs.artifact_digest }}');
-  const attest = build.steps.find((s) => s.uses?.startsWith('actions/attest-build-provenance@'));
-  assert.equal(attest.with['subject-path'], '${{ steps.package.outputs.artifact_file }}');
-  assert.equal(attest.if, 'inputs.require-attestation');
+  assert.equal(build.steps.find((s) => s.uses?.startsWith('actions/attest')), undefined);
   const upload = build.steps.find((s) => s.uses?.startsWith('actions/upload-artifact@'));
   assert.equal(upload.with.path, '${{ steps.package.outputs.artifact_file }}');
   assert.equal(upload.with['if-no-files-found'], 'error');
@@ -209,7 +206,7 @@ test('caller template: triggers, permissions {}, job id pipeline at a pinned SHA
   const job = caller.jobs.pipeline;
   assert.equal(job.name, undefined, 'a name on the calling job would change every check name');
   assert.match(job.uses, /^susanbeasles\/workflow_depot\/\.github\/workflows\/pipeline\.yml@[0-9a-f]{40}$/);
-  assert.deepEqual(job.permissions, { contents: 'read', 'id-token': 'write', attestations: 'write' });
+  assert.deepEqual(job.permissions, { contents: 'read', 'id-token': 'write' });
 });
 
 test('check names the pipeline implies equal the names the authorizer policy requires', (t) => {

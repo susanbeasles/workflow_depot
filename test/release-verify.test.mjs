@@ -143,15 +143,14 @@ test('cross-document identity checks: policy, signer, release marker and applica
 
 test('signed stage requires structurally valid Sigstore bundles',async()=>{
  await withRelease(async f=>{
-  await assert.rejects(()=>verifyRelease(f.out,{stage:'signed'}),/missing: release.zip.sigstore.json, release.meta.json.sigstore.json, release.zip.intoto.jsonl/);
+  await assert.rejects(()=>verifyRelease(f.out,{stage:'signed'}),/missing: release.zip.sigstore.json, release.meta.json.sigstore.json\)/);
   write(f.out,'release.zip.sigstore.json',SIGNATURE);
   write(f.out,'release.meta.json.sigstore.json',SIGNATURE);
-  write(f.out,'release.zip.intoto.jsonl',SIGNATURE+'\n');
   await assert.rejects(()=>verifyRelease(f.out),/unexpected: release.meta.json.sigstore.json/);
   assert.equal((await verifyRelease(f.out,{stage:'signed'})).releaseTag,'v1.2.3');
-  writeFileSync(join(f.out,'release.zip.intoto.jsonl'),'{"not":"a bundle"}\n');
+  writeFileSync(join(f.out,'release.zip.sigstore.json'),'{"not":"a bundle"}');
   await assert.rejects(()=>verifyRelease(f.out,{stage:'signed'}),/not a Sigstore bundle/);
-  writeFileSync(join(f.out,'release.zip.intoto.jsonl'),'');
+  writeFileSync(join(f.out,'release.zip.sigstore.json'),'');
   await assert.rejects(()=>verifyRelease(f.out,{stage:'signed'}),/empty/);
   await assert.rejects(()=>verifyRelease(f.out,{stage:'published'}),/stage must be/);
  });
@@ -160,9 +159,8 @@ test('signed stage requires structurally valid Sigstore bundles',async()=>{
 test('published layout verifies the GitHub Release asset set without loose bundles',async()=>{
  await withRelease(async f=>{
   for(const name of ['release.zip.sigstore.json','release.meta.json.sigstore.json'])write(f.out,name,SIGNATURE);
-  write(f.out,'release.zip.intoto.jsonl',SIGNATURE+'\n');
-  const assets=join(f.root,'assets');
-  for(const name of ['release.zip','release.zip.sigstore.json','release.meta.json','release.meta.json.sigstore.json','release.zip.intoto.jsonl','sbom.cdx.json','sbom.spdx.json','checksums.json','SHA256SUMS','authorization-policy.json'])
+   const assets=join(f.root,'assets');
+  for(const name of ['release.zip','release.zip.sigstore.json','release.meta.json','release.meta.json.sigstore.json','sbom.cdx.json','sbom.spdx.json','checksums.json','SHA256SUMS','authorization-policy.json'])
    write(assets,name,readFileSync(join(f.out,name)));
   const result=await verifyRelease(assets,{stage:'signed',layout:'published',application:application()});
   assert.deepEqual(result.targets.map(t=>t.id),['demoapp-d1-migrations','demoapp-worker']);

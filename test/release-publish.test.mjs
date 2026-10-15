@@ -17,7 +17,6 @@ async function signedRelease(){
  const f=makeApp();
  await buildRelease(f);
  for(const name of ['release.zip.sigstore.json','release.meta.json.sigstore.json'])write(f.out,name,SIGNATURE);
- write(f.out,'release.zip.intoto.jsonl',SIGNATURE+'\n');
  return f;
 }
 // Scripted GitHub API: answers by method+path, records every call.
@@ -57,7 +56,7 @@ test('GitHub publication: draft, upload every asset, publish, confirm tag',async
   assert.equal(draft.draft,true);assert.equal(draft.target_commitish,SOURCE_COMMIT);assert.equal(draft.tag_name,'v1.2.3');
   const uploads=gh.calls.filter(c=>c.key.startsWith('POST uploads.github.com')).map(c=>new URL(c.url).searchParams.get('name'));
   assert.deepEqual(uploads,RELEASE_ASSETS);
-  assert.equal(RELEASE_ASSETS.length,10);
+  assert.equal(RELEASE_ASSETS.length,9);
   assert.ok(keys.indexOf(`PATCH api.github.com/repos/${REPO}/releases/77`)>keys.lastIndexOf(`POST uploads.github.com/repos/${REPO}/releases/77/assets`));
   assert.equal(keys.at(-1),`GET api.github.com/repos/${REPO}/git/ref/tags/v1.2.3`);
  }finally{f.cleanup();}

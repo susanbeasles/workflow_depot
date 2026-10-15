@@ -35,6 +35,41 @@ def adapt(original):
  text=text[:pos]+guard+text[pos:]
  start=text.index('\n  codeql:');pos=text.index(addition,start)+len(addition)
  text=text[:pos]+'      - name: Apply owned CodeQL Advanced configuration\n        run: python3 .security-depot/ci/materialize-codeql.py\n'+text[pos:]
+ # Accepted findings are read from the scanned repository's default branch, never from the
+ # commit under test (scripts/count_blocking.py).
+ env_anchor='  DEPOT: ${{ github.workspace }}/.security-depot\n'
+ assert text.count(env_anchor)==1
+ text=text.replace(env_anchor,env_anchor+'  ACCEPTED_REPO: ${{ github.workspace }}/src\n  ACCEPTED_REF: refs/remotes/origin/${{ github.event.repository.default_branch }}\n')
+ # Callers' Actions policy allows only owner and GitHub actions: install cosign from the
+ # SHA-256 pinned tool registry instead of the third-party sigstore/cosign-installer.
+ installer='      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2\n'
+ assert text.count(installer)==1
+ text=text.replace(installer,'      # cosign comes from the tool registry (SHA-256 pinned, fail closed), not a third-party\n      # action: callers\' Actions policy allows only owner and GitHub actions.\n      - uses: ./.security-depot/.github/actions/install-tool\n        with: { tool: cosign }\n')
+ # actions/setup-python's interpreter has no PyYAML, and every registry read and tool install
+ # imports yaml. A venv over the runner's system Python keeps its PyYAML and still allows the
+ # registry-pinned pip installs (the system interpreter itself is externally managed).
+ setup_py='        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0\n        with: { python-version: "3.12" }\n'
+ assert text.count(setup_py)==1
+ text=text.replace(setup_py,'        name: Python venv over the system interpreter (keeps its PyYAML)\n        run: |\n          /usr/bin/python3 -c "import yaml"\n          /usr/bin/python3 -m venv --system-site-packages "$RUNNER_TEMP/pyenv"\n          echo "$RUNNER_TEMP/pyenv/bin" >> "$GITHUB_PATH"\n          # Depot scanner installs must not seed the pip cache that CACHE-CONTENT audits.\n          echo "PIP_NO_CACHE_DIR=1" >> "$GITHUB_ENV"\n')
+ # Caller-waived CodeQL languages (space-separated). A waived language reports NOT_APPLICABLE with the
+ # waiver in its reason, so it is named in the evidence instead of silently absent; the other
+ # languages still gate, and SAST-SEMGREP (which includes p/swift) still gates the waived code.
+ waive_in='      codeql_waive_languages:\n        description: "Space-separated CodeQL languages the caller waives; only swift (covered by Semgrep p/swift) is honored, others still run"\n        type: string\n        default: ""\n'
+ text=text.replace('    inputs:\n','    inputs:\n'+waive_in,1)
+ codeql_step='      - uses: ./.security-depot/.github/actions/sast-codeql\n'
+ assert text.count(codeql_step)==1
+ # Only languages with a Semgrep pack in the default registry list may be waived (today: swift);
+ # any other listed language is ignored and CodeQL still runs on it.
+ waived="matrix.language == 'swift' && contains(format(' {0} ', inputs.codeql_waive_languages), format(' {0} ', matrix.language))"
+ text=text.replace(codeql_step,
+  "      - name: CodeQL waived by caller\n        if: ${{ "+waived+" }}\n"
+  "        run: python3 .security-depot/.github/scripts/result.py --control \"SAST-CODEQL-${{ matrix.language }}\" --domain A --status NOT_APPLICABLE --reason \"waived by caller (codeql_waive_languages); SAST-SEMGREP still gates this code\" --tool codeql\n"
+  "      - if: ${{ !("+waived+") }}\n        uses: ./.security-depot/.github/actions/sast-codeql\n")
+ # CodeQL results are not uploaded to GitHub code scanning (sast-codeql: upload: never),
+ # so the job needs no security-events permission.
+ perm='    permissions: { contents: read, security-events: write }\n'
+ assert text.count(perm)==1
+ text=text.replace(perm,'    permissions: { contents: read }\n')
  return text
 if __name__=='__main__':
  import pathlib
