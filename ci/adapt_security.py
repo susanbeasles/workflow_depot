@@ -45,6 +45,12 @@ def adapt(original):
  installer='      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2\n'
  assert text.count(installer)==1
  text=text.replace(installer,'      # cosign comes from the tool registry (SHA-256 pinned, fail closed), not a third-party\n      # action: callers\' Actions policy allows only owner and GitHub actions.\n      - uses: ./.security-depot/.github/actions/install-tool\n        with: { tool: cosign }\n')
+ # actions/setup-python's interpreter has no PyYAML, and every registry read and tool install
+ # imports yaml. A venv over the runner's system Python keeps its PyYAML and still allows the
+ # registry-pinned pip installs (the system interpreter itself is externally managed).
+ setup_py='        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0\n        with: { python-version: "3.12" }\n'
+ assert text.count(setup_py)==1
+ text=text.replace(setup_py,'        name: Python venv over the system interpreter (keeps its PyYAML)\n        run: |\n          /usr/bin/python3 -c "import yaml"\n          /usr/bin/python3 -m venv --system-site-packages "$RUNNER_TEMP/pyenv"\n          echo "$RUNNER_TEMP/pyenv/bin" >> "$GITHUB_PATH"\n')
  return text
 if __name__=='__main__':
  import pathlib

@@ -13,7 +13,7 @@ LOCKS = {"npm": r"(^|/)package-lock\.json$", "yarn": r"(^|/)yarn\.lock$", "pnpm"
          "python": r"(^|/)(uv\.lock|poetry\.lock|requirements[^/]*\.txt)$", "cargo": r"(^|/)Cargo\.lock$", "swift": r"(^|/)Package\.resolved$"}
 CODEQL = [("node", "javascript-typescript"), ("python", "python"), ("rust", "rust"), ("swift", "swift"), ("go", "go"), ("java", "java-kotlin"), ("cpp", "c-cpp"), ("workflows", "actions")]
 # Languages CodeQL can analyse without running a project build. Everything else needs an explicit, operator-approved build command.
-CODEQL_NO_BUILD = {"javascript-typescript", "python", "actions", "ruby"}
+CODEQL_NO_BUILD = {"javascript-typescript", "python", "actions", "ruby", "rust"}  # rust: CodeQL supports build-mode none only
 
 
 def main():

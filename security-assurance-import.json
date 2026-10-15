@@ -34,7 +34,7 @@
     },
     {
       "path": ".github/actions/sast-shellcheck/action.yml",
-      "sha256": "773c1bbdf94aabcacbf7791e26976afcb292b401ace0467eab11c1d839ddfda1",
+      "sha256": "dc983469710125e257e229ddcda1da2357fb5bb8c1d64d921445c0b4f6529771",
       "mode": 420
     },
     {
@@ -174,7 +174,7 @@
     },
     {
       "path": ".github/scripts/detect_ecosystems.py",
-      "sha256": "f74863e748aa9e7760fdb21bbb5e41c2ceb26ada6965bed68b9213957d0fb939",
+      "sha256": "a490464511023fb51f51e358b9627816a1b3fc99cb6488a8d9988b9de8fadfb5",
       "mode": 493
     },
     {
@@ -403,6 +403,18 @@
       "from_sha256": "8ffb8d705cbcf21263fe6fc8a9d05f2d9f53402cec379b517ebdfb85ec72be28",
       "to_sha256": "97a1f6aadff2f11f44431109b656497a26b868fd5410ff8a354419e3caa5ba0b",
       "reason": "Adds exact-match accepted findings, read only from the scanned repository's default branch (.security/accepted-findings.yml): rule + path + file SHA-256, reason, expiry within 366 days; matches move to an 'accepted' list in the evidence; malformed lists fail closed (ci/test-accepted-findings.py)."
+    },
+    {
+      "path": ".github/actions/sast-shellcheck/action.yml",
+      "from_sha256": "773c1bbdf94aabcacbf7791e26976afcb292b401ace0467eab11c1d839ddfda1",
+      "to_sha256": "dc983469710125e257e229ddcda1da2357fb5bb8c1d64d921445c0b4f6529771",
+      "reason": "ShellCheck ran under xargs, which reports 123 whenever shellcheck exits 1 (findings), so any repository with a ShellCheck finding got TOOL_FAILURE instead of FAIL (porchlight main, Security run 38785256092). ShellCheck now runs once over the file list so its own exit code is classified: 0 PASS, 1 FAIL, anything else TOOL_FAILURE."
+    },
+    {
+      "path": ".github/scripts/detect_ecosystems.py",
+      "from_sha256": "f74863e748aa9e7760fdb21bbb5e41c2ceb26ada6965bed68b9213957d0fb939",
+      "to_sha256": "a490464511023fb51f51e358b9627816a1b3fc99cb6488a8d9988b9de8fadfb5",
+      "reason": "CodeQL supports only build-mode none for Rust; listing rust as requiring a build made CodeQL init fail ('Rust does not support the manual build mode') and SAST-CODEQL-rust report POLICY_UNAVAILABLE (porchlight main, Security run 38785256092). Rust is now a no-build language."
     }
   ]
 }
