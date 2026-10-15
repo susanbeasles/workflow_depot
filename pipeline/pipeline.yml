@@ -40,13 +40,9 @@ on:
         type: string
         default: npm run build --if-present
       artifact-path:
-        description: File or directory (relative to working-directory) to package and attest. Empty packages `npm pack` output.
+        description: File or directory (relative to working-directory) to package. Empty packages `npm pack` output.
         type: string
         default: ''
-      require-attestation:
-        description: Attest build provenance for the artifact. Set false only where attestations are unavailable.
-        type: boolean
-        default: true
     outputs:
       artifact_digest:
         description: sha256:<hex> of the packaged artifact.
@@ -428,8 +424,6 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-      id-token: write # Sigstore signing certificate for the provenance attestation
-      attestations: write # store the attestation for the artifact digest
     outputs:
       artifact_digest: ${{ steps.package.outputs.artifact_digest }}
     defaults:
@@ -442,7 +436,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ inputs.node-version }}
-          # No dependency cache in the job that produces the attested artifact.
+          # No dependency cache in the job that produces the released artifact.
           package-manager-cache: false
       - name: Install
         env:
@@ -565,10 +559,6 @@ jobs:
           path: ${{ steps.package.outputs.artifact_file }}
           if-no-files-found: error
           overwrite: true
-      - if: inputs.require-attestation
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: ${{ steps.package.outputs.artifact_file }}
 
   shadow:
     name: shadow # the check name is `pipeline / shadow`; the authorizer requires it exactly
