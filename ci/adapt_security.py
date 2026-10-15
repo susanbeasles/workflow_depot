@@ -35,6 +35,11 @@ def adapt(original):
  text=text[:pos]+guard+text[pos:]
  start=text.index('\n  codeql:');pos=text.index(addition,start)+len(addition)
  text=text[:pos]+'      - name: Apply owned CodeQL Advanced configuration\n        run: python3 .security-depot/ci/materialize-codeql.py\n'+text[pos:]
+ # Accepted findings are read from the scanned repository's default branch, never from the
+ # commit under test (scripts/count_blocking.py).
+ env_anchor='  DEPOT: ${{ github.workspace }}/.security-depot\n'
+ assert text.count(env_anchor)==1
+ text=text.replace(env_anchor,env_anchor+'  ACCEPTED_REPO: ${{ github.workspace }}/src\n  ACCEPTED_REF: refs/remotes/origin/${{ github.event.repository.default_branch }}\n')
  # Callers' Actions policy allows only owner and GitHub actions: install cosign from the
  # SHA-256 pinned tool registry instead of the third-party sigstore/cosign-installer.
  installer='      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2\n'

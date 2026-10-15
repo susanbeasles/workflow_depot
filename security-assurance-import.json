@@ -169,7 +169,7 @@
     },
     {
       "path": ".github/scripts/asset_scan.py",
-      "sha256": "ee12a2fe0a5262b3ae2b5e4abc9a907070d138d82af5ebc0ef536c812eea501e",
+      "sha256": "1ce51c50bdc29ab3e68435db39e4688f3c7a8473015977165dc5e817c712207d",
       "mode": 493
     },
     {
@@ -234,7 +234,7 @@
     },
     {
       "path": ".github/scripts/count_blocking.py",
-      "sha256": "8ffb8d705cbcf21263fe6fc8a9d05f2d9f53402cec379b517ebdfb85ec72be28",
+      "sha256": "97a1f6aadff2f11f44431109b656497a26b868fd5410ff8a354419e3caa5ba0b",
       "mode": 493
     },
     {
@@ -391,6 +391,18 @@
       "from_sha256": "33a30bbd9b3d20f470004e9122fea0474aa47899759ae127f3aebd7f0196f300",
       "to_sha256": "da9a31f8f61b5e11f8bc3ce89dce6d2289fe696f365e2c4edfc262e9dcbe5432",
       "reason": "Input description contained the expression ${{ job.status }}. GitHub evaluates expressions in action metadata and the job context is not available there, so every job using this action failed to load it (first live run, porchlight PR #9). Description changed to plain text; behavior unchanged."
+    },
+    {
+      "path": ".github/scripts/asset_scan.py",
+      "from_sha256": "ee12a2fe0a5262b3ae2b5e4abc9a907070d138d82af5ebc0ef536c812eea501e",
+      "to_sha256": "1ce51c50bdc29ab3e68435db39e4688f3c7a8473015977165dc5e817c712207d",
+      "reason": "XML-DTD refused Apple's standard public plist DOCTYPE in every Info.plist (critical false positive, porchlight PR #9). Exactly that declaration, once, with no ENTITY and no internal subset, is now removed before parsing; every other DOCTYPE, ENTITY or internal subset stays critical (ci/test-asset-plist.py)."
+    },
+    {
+      "path": ".github/scripts/count_blocking.py",
+      "from_sha256": "8ffb8d705cbcf21263fe6fc8a9d05f2d9f53402cec379b517ebdfb85ec72be28",
+      "to_sha256": "97a1f6aadff2f11f44431109b656497a26b868fd5410ff8a354419e3caa5ba0b",
+      "reason": "Adds exact-match accepted findings, read only from the scanned repository's default branch (.security/accepted-findings.yml): rule + path + file SHA-256, reason, expiry within 366 days; matches move to an 'accepted' list in the evidence; malformed lists fail closed (ci/test-accepted-findings.py)."
     }
   ]
 }

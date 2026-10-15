@@ -111,6 +111,8 @@ env:
   RESULTS_DIR: ${{ github.workspace }}/security-results
   CORRELATION_ID: ${{ github.run_id }}-${{ github.run_attempt }}
   DEPOT: ${{ github.workspace }}/.security-depot
+  ACCEPTED_REPO: ${{ github.workspace }}/src
+  ACCEPTED_REF: refs/remotes/origin/${{ github.event.repository.default_branch }}
   # Pinned action SHAs (must match policy/tool-registry.yml)
   CODEQL_ACTION_SHA: 24c54180a607b1449ed407dd24f251e4e9147c8d
 

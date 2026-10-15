@@ -63,10 +63,21 @@ def ns_of(tag):
     return tag[1:].split("}", 1)[0] if isinstance(tag, str) and tag.startswith("{") else ""
 
 
+APPLE_PLIST_DOCTYPE = '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+
+
 def scan_svg_or_xml(path, data, F, is_svg):
     text = data.decode("utf-8", errors="replace")
     # Stage 1: raw checks that must happen before any parser touches the bytes.
     low = text.lower()
+    # Apple's property-list header names a public DTD by identifier, with no internal
+    # subset and no entities: nothing to expand, and expat never fetches it. Accept exactly
+    # that one declaration, remove it before parsing, and still refuse any other DOCTYPE,
+    # any ENTITY and any internal subset.
+    if text.count(APPLE_PLIST_DOCTYPE) == 1 and "<!entity" not in low:
+        text = text.replace(APPLE_PLIST_DOCTYPE, "", 1)
+        data = text.encode("utf-8")
+        low = text.lower()
     if "<!doctype" in low or "<!entity" in low:
         F.add("critical", "XML-DTD", path, "DOCTYPE/ENTITY declaration (XXE / entity-expansion vector); not parsed further")
         return
