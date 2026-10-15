@@ -29,17 +29,17 @@
     },
     {
       "path": ".github/actions/sast-ecosystem/action.yml",
-      "sha256": "670dc2780959593087e3782374b3bd0158f6b31f4a7c3071b842f6fec4543b0c",
+      "sha256": "77bf384218014f9ee9bf506b3f21e501fe88cbc81a3e1643d08c7e6c36ed6ca1",
       "mode": 420
     },
     {
       "path": ".github/actions/sast-shellcheck/action.yml",
-      "sha256": "dc983469710125e257e229ddcda1da2357fb5bb8c1d64d921445c0b4f6529771",
+      "sha256": "97101f20bc2c5b001c3830f0c346aad111f8293f7ada2b9575ee2df24660a42b",
       "mode": 420
     },
     {
       "path": ".github/actions/sast-semgrep/action.yml",
-      "sha256": "067fd83421e09302ee3b227d0e6f01a20e4ae30bc01608ed77d05bc66ab88ac4",
+      "sha256": "f383ae5238f15e8485924a491b8a4599ccd110dd95add5fa305c71b405f02edb",
       "mode": 420
     },
     {
@@ -421,6 +421,24 @@
       "from_sha256": "af6ccc2a4d8995e6d8d9b3994a7d88bd8eeff9aad2d6aa135031f712dd1a0868",
       "to_sha256": "067fd83421e09302ee3b227d0e6f01a20e4ae30bc01608ed77d05bc66ab88ac4",
       "reason": "Adds p/swift to the default Semgrep registry packs. Swift CodeQL needs a macOS runner; callers may waive it (codeql_waive_languages), and Semgrep then has to actually cover Swift code."
+    },
+    {
+      "path": ".github/actions/sast-semgrep/action.yml",
+      "from_sha256": "067fd83421e09302ee3b227d0e6f01a20e4ae30bc01608ed77d05bc66ab88ac4",
+      "to_sha256": "f383ae5238f15e8485924a491b8a4599ccd110dd95add5fa305c71b405f02edb",
+      "reason": "Status followed the scanner's exit code, so exit 1 (any finding, even low or info) was FAIL. That ignored the policy's fail_on severities (release-policy.yml: semgrep critical/high, bandit high, shellcheck high) and bypassed reviewed accepted findings, which apply in count_blocking.py. Exit 0/1 now goes through count_blocking at the policy severities; any other exit, or a parse error, stays TOOL_FAILURE."
+    },
+    {
+      "path": ".github/actions/sast-ecosystem/action.yml",
+      "from_sha256": "670dc2780959593087e3782374b3bd0158f6b31f4a7c3071b842f6fec4543b0c",
+      "to_sha256": "77bf384218014f9ee9bf506b3f21e501fe88cbc81a3e1643d08c7e6c36ed6ca1",
+      "reason": "Status followed the scanner's exit code, so exit 1 (any finding, even low or info) was FAIL. That ignored the policy's fail_on severities (release-policy.yml: semgrep critical/high, bandit high, shellcheck high) and bypassed reviewed accepted findings, which apply in count_blocking.py. Exit 0/1 now goes through count_blocking at the policy severities; any other exit, or a parse error, stays TOOL_FAILURE."
+    },
+    {
+      "path": ".github/actions/sast-shellcheck/action.yml",
+      "from_sha256": "dc983469710125e257e229ddcda1da2357fb5bb8c1d64d921445c0b4f6529771",
+      "to_sha256": "97101f20bc2c5b001c3830f0c346aad111f8293f7ada2b9575ee2df24660a42b",
+      "reason": "Status followed the scanner's exit code, so exit 1 (any finding, even low or info) was FAIL. That ignored the policy's fail_on severities (release-policy.yml: semgrep critical/high, bandit high, shellcheck high) and bypassed reviewed accepted findings, which apply in count_blocking.py. Exit 0/1 now goes through count_blocking at the policy severities; any other exit, or a parse error, stays TOOL_FAILURE."
     }
   ]
 }

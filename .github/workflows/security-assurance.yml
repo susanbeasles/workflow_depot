@@ -282,6 +282,8 @@ jobs:
           /usr/bin/python3 -c "import yaml"
           /usr/bin/python3 -m venv --system-site-packages "$RUNNER_TEMP/pyenv"
           echo "$RUNNER_TEMP/pyenv/bin" >> "$GITHUB_PATH"
+          # Depot scanner installs must not seed the pip cache that CACHE-CONTENT audits.
+          echo "PIP_NO_CACHE_DIR=1" >> "$GITHUB_ENV"
       - if: matrix.scan == 'sast-ecosystem'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: "22" }

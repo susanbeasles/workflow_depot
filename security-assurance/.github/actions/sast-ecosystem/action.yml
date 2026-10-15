@@ -18,7 +18,7 @@ runs:
           pip install --disable-pip-version-check -q "bandit==$BV" "pip-audit==$PV" >"$E/py-tools-install.log" 2>&1
           timeout 600 bandit -r . -f json -o "$E/bandit.json" -x './.git,./node_modules,./.venv,./venv,./tests,./test' -ll >"$E/bandit.log" 2>&1; RC=$?
           python3 "$S/normalize.py" --tool bandit --in "$E/bandit.json" --out "$E/bandit.findings.json"; NF="$E/bandit.findings.json"
-          case $RC in 0) ST=PASS;; 1) ST=FAIL;; *) ST=TOOL_FAILURE;; esac; grep -q '"parse_error": "' "$NF" 2>/dev/null && ST=TOOL_FAILURE
+          case $RC in 0|1) ST=$(st "$(python3 "$S/count_blocking.py" "$NF" high)");; *) ST=TOOL_FAILURE;; esac  # exit 1 only means "findings"; the policy fail_on severities decide, after reviewed accepted findings
           python3 "$S/result.py" --control SAST-BANDIT --domain A --status $ST --reason "bandit exit $RC" --tool bandit --tool-version "$BV" --findings-json "$E/bandit.findings.json" --evidence "$E/bandit.findings.json" --duration-s $((SECONDS-T0))
           T0=$SECONDS; REQ=$(ls requirements*.txt 2>/dev/null | head -1)
           if [ -n "$REQ" ]; then timeout 600 pip-audit -r "$REQ" --no-deps --skip-editable -f json -o "$E/pip-audit.json" >"$E/pip-audit.log" 2>&1; RC=$?

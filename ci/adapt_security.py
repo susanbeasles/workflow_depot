@@ -50,7 +50,7 @@ def adapt(original):
  # registry-pinned pip installs (the system interpreter itself is externally managed).
  setup_py='        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0\n        with: { python-version: "3.12" }\n'
  assert text.count(setup_py)==1
- text=text.replace(setup_py,'        name: Python venv over the system interpreter (keeps its PyYAML)\n        run: |\n          /usr/bin/python3 -c "import yaml"\n          /usr/bin/python3 -m venv --system-site-packages "$RUNNER_TEMP/pyenv"\n          echo "$RUNNER_TEMP/pyenv/bin" >> "$GITHUB_PATH"\n')
+ text=text.replace(setup_py,'        name: Python venv over the system interpreter (keeps its PyYAML)\n        run: |\n          /usr/bin/python3 -c "import yaml"\n          /usr/bin/python3 -m venv --system-site-packages "$RUNNER_TEMP/pyenv"\n          echo "$RUNNER_TEMP/pyenv/bin" >> "$GITHUB_PATH"\n          # Depot scanner installs must not seed the pip cache that CACHE-CONTENT audits.\n          echo "PIP_NO_CACHE_DIR=1" >> "$GITHUB_ENV"\n')
  # Caller-waived CodeQL languages (space-separated). A waived language reports NOT_APPLICABLE with the
  # waiver in its reason, so it is named in the evidence instead of silently absent; the other
  # languages still gate, and SAST-SEMGREP (which includes p/swift) still gates the waived code.

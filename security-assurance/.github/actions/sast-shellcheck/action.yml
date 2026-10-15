@@ -25,7 +25,7 @@ runs:
         # One invocation, so RC is shellcheck's own (1 = findings); xargs would report 123.
         timeout 600 shellcheck -f json -S style -x -- "${SH_FILES[@]}" >"$E/shellcheck.json" 2>"$E/shellcheck.err"; RC=$?
         python3 "$S/normalize.py" --tool shellcheck --in "$E/shellcheck.json" --out "$E/shellcheck.findings.json"; NF="$E/shellcheck.findings.json"
-        case $RC in 0) ST=PASS;; 1) ST=FAIL;; *) ST=TOOL_FAILURE;; esac; grep -q '"parse_error": "' "$NF" 2>/dev/null && ST=TOOL_FAILURE
+        case $RC in 0|1) ST=$(st "$(python3 "$S/count_blocking.py" "$NF" high)");; *) ST=TOOL_FAILURE;; esac  # exit 1 only means "findings"; the policy fail_on severities decide, after reviewed accepted findings
         python3 "$S/result.py" --control SAST-SHELLCHECK --domain A --status $ST --reason "shellcheck exit $RC over $(tr -cd '\0' < "$RUNNER_TEMP/sh.list" | wc -c) files" \
           --tool shellcheck --tool-version "${{ steps.sc.outputs.version }}" --tool-digest "${{ steps.sc.outputs.digest }}" \
           --findings-json "$E/shellcheck.findings.json" --evidence "$E/shellcheck.findings.json" --duration-s $((SECONDS-T0)) --coverage "zsh-specific syntax not analysed"

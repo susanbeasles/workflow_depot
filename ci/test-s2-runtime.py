@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Regression checks for stage-2 failures seen on the first full caller run (porchlight run 38785256092)."""
-import pathlib, re, subprocess, sys, tempfile
+import json, pathlib, re, subprocess, sys, tempfile
 sys.dont_write_bytecode = True
 root = pathlib.Path(__file__).resolve().parents[1]
 sa = root / "security-assurance"
@@ -33,3 +33,19 @@ assert "--status NOT_APPLICABLE --reason \"waived by caller (codeql_waive_langua
 assert "if: ${{ !contains(format(' {0} ', inputs.codeql_waive_languages), format(' {0} ', matrix.language)) }}\n        uses: ./.security-depot/.github/actions/sast-codeql" in live
 assert " p/swift " in (sa / ".github/actions/sast-semgrep/action.yml").read_text()
 print("codeql waiver: ok")
+
+# Exit 1 means "findings"; the policy fail_on severities decide, after accepted findings.
+import yaml
+pol = {c["id"]: c for c in yaml.safe_load((sa / "policy/release-policy.yml").read_text())["controls"]}
+for rel, ctrl in [("sast-semgrep", "SAST-SEMGREP"), ("sast-ecosystem", "SAST-BANDIT"), ("sast-shellcheck", "SAST-SHELLCHECK")]:
+    t = (sa / f".github/actions/{rel}/action.yml").read_text()
+    sev = ",".join(pol[ctrl]["fail_on"])
+    assert f'0|1) ST=$(st "$(python3 "$S/count_blocking.py" "$NF" {sev})");; *) ST=TOOL_FAILURE' in t, (rel, sev)
+with tempfile.TemporaryDirectory() as t:
+    f = pathlib.Path(t, "f.json")
+    f.write_text(json.dumps({"items": [{"severity": "medium", "rule": "B108", "path": "x.py"}, {"severity": "low", "rule": "r", "path": "y"}]}))
+    out = subprocess.run([sys.executable, str(sa / ".github/scripts/count_blocking.py"), str(f), "high"], capture_output=True, text=True, env={"PATH": "/usr/bin"}).stdout.strip()
+    assert out == "0", out
+print("fail_on status: ok")
+assert 'echo "PIP_NO_CACHE_DIR=1" >> "$GITHUB_ENV"' in live
+print("pip cache isolation: ok")
