@@ -1,0 +1,329 @@
+# Universal release workflow (stage 6). Called by an application pipeline after promotion
+# checks; composed only of this depot's single-concern composite actions.
+#
+#   bundle (contents: read)  -> attest (id-token + attestations: write) -> publish (contents: write)
+#                                                                        -> publish-objects (optional R2)
+#
+# Runs for push events on refs/heads/main (version from Conventional Commits since the last
+# vX.Y.Z tag; nothing releasable => released=false and success) or on a vX.Y.Z tag push that
+# points at github.sha. Publication is write-once. Nothing here deploys, runs Terraform or
+# holds Cloudflare credentials; R2 publication is skipped unless r2 inputs are set.
+#
+# Callers must pin this workflow to a full commit SHA and pass the same SHA as depot_ref:
+# the Fulcio identity of the signatures is job_workflow_ref =
+# susanbeasles/workflow_depot/.github/workflows/release.yml@<sha>, and attest-release fails
+# if release.meta.json's builder.workflow differs from it.
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      depot_ref:
+        description: Full 40-hex commit of susanbeasles/workflow_depot; must equal the SHA this workflow is pinned to
+        type: string
+        required: true
+      application_manifest:
+        description: application-deployment/v1 manifest path in the calling repository
+        type: string
+        default: deployment/application.json
+      r2_account_id:
+        description: Cloudflare account id for optional R2 publication (empty skips R2)
+        type: string
+        default: ''
+      r2_bucket:
+        description: Release bucket for optional R2 publication (empty skips R2)
+        type: string
+        default: ''
+    secrets:
+      R2_ACCESS_KEY_ID:
+        required: false
+      R2_SECRET_ACCESS_KEY:
+        required: false
+    outputs:
+      released:
+        description: "'true' when a release was produced and published"
+        value: ${{ jobs.bundle.outputs.released }}
+      releaseTag:
+        description: Published release tag (empty when released is false)
+        value: ${{ jobs.bundle.outputs.release_tag }}
+      manifestSha256:
+        description: sha256 of release.meta.json
+        value: ${{ jobs.bundle.outputs.manifest_sha256 }}
+
+permissions: {}
+
+concurrency:
+  group: workflow-depot-release-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  DEPOT_REPOSITORY: susanbeasles/workflow_depot
+
+jobs:
+  bundle:
+    name: Bundle (unprivileged)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      released: ${{ steps.version.outputs.released }}
+      release_tag: ${{ steps.context.outputs.release_tag }}
+      manifest_sha256: ${{ steps.verify.outputs.manifest_sha256 }}
+    steps:
+      - name: Validate inputs
+        shell: bash
+        env:
+          DEPOT_REF: ${{ inputs.depot_ref }}
+          APPLICATION_MANIFEST: ${{ inputs.application_manifest }}
+        run: |
+          set -euo pipefail
+          [[ "$DEPOT_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::depot_ref must be a full 40-hex commit SHA"; exit 1; }
+          [[ "$APPLICATION_MANIFEST" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$ && "$APPLICATION_MANIFEST" != *..* ]] || { echo "::error::application_manifest must be a normalized relative path"; exit 1; }
+      - name: Check out the application at the exact commit with tags
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: app
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+      - name: Check out the depot at the pinned revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.DEPOT_REPOSITORY }}
+          ref: ${{ inputs.depot_ref }}
+          path: .depot
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - id: version
+        uses: ./.depot/.github/actions/compute-release-version
+        with:
+          app_path: ${{ github.workspace }}/app
+          state_dir: ${{ github.workspace }}/.release/state
+      - id: context
+        if: steps.version.outputs.released == 'true'
+        uses: ./.depot/.github/actions/resolve-release-context
+        with:
+          release_tag: ${{ steps.version.outputs.release_tag }}
+          state_dir: ${{ github.workspace }}/.release/state
+      - id: application
+        if: steps.version.outputs.released == 'true'
+        uses: ./.depot/.github/actions/read-application-manifest
+        with:
+          app_path: ${{ github.workspace }}/app
+          manifest: ${{ inputs.application_manifest }}
+          context_path: ${{ steps.context.outputs.context_path }}
+          state_dir: ${{ github.workspace }}/.release/state
+      - id: worker
+        if: steps.version.outputs.released == 'true' && steps.application.outputs.worker_target != ''
+        uses: ./.depot/.github/actions/build-worker-bundle
+        with:
+          app_path: ${{ github.workspace }}/app
+          application_path: ${{ steps.application.outputs.application_path }}
+          target: ${{ steps.application.outputs.worker_target }}
+          release_tag: ${{ steps.context.outputs.release_tag }}
+          source_commit: ${{ steps.context.outputs.source_commit }}
+          work_dir: ${{ github.workspace }}/.release/work
+          release_dir: ${{ github.workspace }}/.release/out
+      - id: migrations
+        if: steps.version.outputs.released == 'true' && steps.application.outputs.migrations_target != ''
+        uses: ./.depot/.github/actions/bundle-migrations
+        with:
+          app_path: ${{ github.workspace }}/app
+          application_path: ${{ steps.application.outputs.application_path }}
+          target: ${{ steps.application.outputs.migrations_target }}
+          release_dir: ${{ github.workspace }}/.release/out
+      - if: steps.version.outputs.released == 'true'
+        uses: ./.depot/.github/actions/write-authorization-policy
+        with:
+          app_path: ${{ github.workspace }}/app
+          application_path: ${{ steps.application.outputs.application_path }}
+          context_path: ${{ steps.context.outputs.context_path }}
+          depot_repository: ${{ env.DEPOT_REPOSITORY }}
+          depot_sha: ${{ inputs.depot_ref }}
+          release_dir: ${{ github.workspace }}/.release/out
+      - name: Materialize the security-assurance module for its qualified tool installer
+        if: steps.version.outputs.released == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir .security-depot
+          cp -a -- .depot/security-assurance/. .security-depot/
+      - id: syft
+        if: steps.version.outputs.released == 'true'
+        uses: ./.security-depot/.github/actions/install-tool
+        with:
+          tool: syft
+      - if: steps.version.outputs.released == 'true'
+        uses: ./.depot/.github/actions/generate-sbom
+        with:
+          syft: ${{ steps.syft.outputs.bin }}
+          release_dir: ${{ github.workspace }}/.release/out
+          work_dir: ${{ github.workspace }}/.release/work
+          release_tag: ${{ steps.context.outputs.release_tag }}
+      - if: steps.version.outputs.released == 'true'
+        uses: ./.depot/.github/actions/checksum-bundles
+        with:
+          release_dir: ${{ github.workspace }}/.release/out
+      - if: steps.version.outputs.released == 'true'
+        uses: ./.depot/.github/actions/assemble-release
+        with:
+          release_dir: ${{ github.workspace }}/.release/out
+      - if: steps.version.outputs.released == 'true'
+        uses: ./.depot/.github/actions/write-release-manifest
+        with:
+          release_dir: ${{ github.workspace }}/.release/out
+          application_path: ${{ steps.application.outputs.application_path }}
+          context_path: ${{ steps.context.outputs.context_path }}
+          depot_repository: ${{ env.DEPOT_REPOSITORY }}
+          depot_sha: ${{ inputs.depot_ref }}
+      - id: verify
+        if: steps.version.outputs.released == 'true'
+        uses: ./.depot/.github/actions/verify-release
+        with:
+          release_dir: ${{ github.workspace }}/.release/out
+          stage: unsigned
+          application_path: ${{ steps.application.outputs.application_path }}
+      - if: steps.version.outputs.released == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ github.sha }}
+          path: ${{ github.workspace }}/.release/out/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Summary
+        if: always()
+        shell: bash
+        env:
+          RELEASED: ${{ steps.version.outputs.released }}
+          RELEASE_TAG: ${{ steps.context.outputs.release_tag }}
+          MANIFEST_SHA256: ${{ steps.verify.outputs.manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASED" == true ]]; then
+            printf '### Release bundle\n\n- tag: %s\n- release.meta.json sha256: %s\n' "$RELEASE_TAG" "$MANIFEST_SHA256" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '### No release\n\nNo releasable Conventional Commits since the last tag (released=false).\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  attest:
+    name: Attest (OIDC signing and provenance)
+    needs: bundle
+    if: needs.bundle.outputs.released == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.DEPOT_REPOSITORY }}
+          ref: ${{ inputs.depot_ref }}
+          path: .depot
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-${{ github.sha }}
+          path: ${{ github.workspace }}/.release/out
+      - id: verify
+        uses: ./.depot/.github/actions/verify-release
+        with:
+          release_dir: ${{ github.workspace }}/.release/out
+          stage: unsigned
+      - uses: ./.depot/.github/actions/attest-release
+        with:
+          release_dir: ${{ github.workspace }}/.release/out
+          builder_workflow: ${{ steps.verify.outputs.builder_workflow }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-signatures-${{ github.sha }}
+          path: |
+            ${{ github.workspace }}/.release/out/release.zip.sigstore.json
+            ${{ github.workspace }}/.release/out/release.meta.json.sigstore.json
+            ${{ github.workspace }}/.release/out/release.zip.intoto.jsonl
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release (write-once)
+    needs: [bundle, attest]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.DEPOT_REPOSITORY }}
+          ref: ${{ inputs.depot_ref }}
+          path: .depot
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-${{ github.sha }}
+          path: ${{ github.workspace }}/.release/out
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-signatures-${{ github.sha }}
+          path: ${{ github.workspace }}/.release/out
+      - uses: ./.depot/.github/actions/verify-release
+        with:
+          release_dir: ${{ github.workspace }}/.release/out
+          stage: signed
+      - uses: ./.depot/.github/actions/publish-github-release
+        with:
+          release_dir: ${{ github.workspace }}/.release/out
+          release_tag: ${{ needs.bundle.outputs.release_tag }}
+
+  publish-objects:
+    name: Publish R2 objects (optional, write-once)
+    needs: [bundle, publish]
+    if: inputs.r2_account_id != '' && inputs.r2_bucket != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.DEPOT_REPOSITORY }}
+          ref: ${{ inputs.depot_ref }}
+          path: .depot
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-${{ github.sha }}
+          path: ${{ github.workspace }}/.release/out
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-signatures-${{ github.sha }}
+          path: ${{ github.workspace }}/.release/out
+      - uses: ./.depot/.github/actions/verify-release
+        with:
+          release_dir: ${{ github.workspace }}/.release/out
+          stage: signed
+      - uses: ./.depot/.github/actions/publish-release-objects
+        with:
+          release_dir: ${{ github.workspace }}/.release/out
+          r2_account_id: ${{ inputs.r2_account_id }}
+          r2_bucket: ${{ inputs.r2_bucket }}
+          r2_access_key_id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2_secret_access_key: ${{ secrets.R2_SECRET_ACCESS_KEY }}

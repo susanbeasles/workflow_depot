@@ -1,0 +1,49 @@
+name: Verify release
+description: >-
+  Independently re-verifies a release directory: every digest, ZIP hygiene (no symlinks,
+  absolute or .. paths, duplicates, >100x ratios, >20k entries), and consistency between
+  release.meta.json, checksums.json, SHA256SUMS, authorization-policy.json and bundle
+  contents. stage=signed additionally requires the Sigstore and attestation bundles.
+inputs:
+  release_dir:
+    description: Release directory
+    required: true
+  stage:
+    description: "unsigned (before attest) or signed (before publication)"
+    required: false
+    default: unsigned
+  application_path:
+    description: Optional validated application manifest to cross-check targets against
+    required: false
+    default: ''
+outputs:
+  application:
+    description: Application id
+    value: ${{ steps.verify.outputs.application }}
+  release_tag:
+    description: Release tag
+    value: ${{ steps.verify.outputs.release_tag }}
+  source_commit:
+    description: Source commit
+    value: ${{ steps.verify.outputs.source_commit }}
+  builder_workflow:
+    description: builder.workflow from release.meta.json
+    value: ${{ steps.verify.outputs.builder_workflow }}
+  manifest_sha256:
+    description: sha256 of release.meta.json
+    value: ${{ steps.verify.outputs.manifest_sha256 }}
+runs:
+  using: composite
+  steps:
+    - id: verify
+      shell: bash
+      env:
+        SCRIPTS: ${{ github.action_path }}/../../../ci/release
+        RELEASE_DIR: ${{ inputs.release_dir }}
+        STAGE: ${{ inputs.stage }}
+        APPLICATION_PATH: ${{ inputs.application_path }}
+      run: |
+        set -euo pipefail
+        args=(--release-dir "$RELEASE_DIR" --stage "$STAGE" --github-output "$GITHUB_OUTPUT")
+        if [[ -n "$APPLICATION_PATH" ]]; then args+=(--application "$APPLICATION_PATH"); fi
+        node "$SCRIPTS/verify-release.mjs" "${args[@]}"

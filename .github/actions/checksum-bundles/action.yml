@@ -1,0 +1,18 @@
+name: Checksum bundles
+description: >-
+  Writes checksums.json (release-checksums/v1) and SHA256SUMS over every bundle, the
+  authorization policy and the SBOMs. Any unexpected file in the release directory fails.
+inputs:
+  release_dir:
+    description: Release output directory
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        SCRIPTS: ${{ github.action_path }}/../../../ci/release
+        RELEASE_DIR: ${{ inputs.release_dir }}
+      run: |
+        set -euo pipefail
+        node "$SCRIPTS/checksum-bundles.mjs" --release-dir "$RELEASE_DIR"

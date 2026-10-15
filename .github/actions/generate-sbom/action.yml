@@ -1,0 +1,37 @@
+name: Generate SBOM
+description: >-
+  Unpacks targets/*.zip with the strict ZIP reader and generates sbom.cdx.json (CycloneDX)
+  and sbom.spdx.json (SPDX) over the release payload with a qualified syft binary
+  (installed by security-assurance's install-tool, which verifies its sha256).
+inputs:
+  syft:
+    description: Absolute path of the qualified syft binary (install-tool output `bin`)
+    required: true
+  release_dir:
+    description: Release output directory containing targets/
+    required: true
+  work_dir:
+    description: Scratch directory (must not already contain sbom-payload)
+    required: true
+  release_tag:
+    description: Release tag recorded as the SBOM source version
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        SCRIPTS: ${{ github.action_path }}/../../../ci/release
+        SYFT: ${{ inputs.syft }}
+        RELEASE_DIR: ${{ inputs.release_dir }}
+        PAYLOAD: ${{ inputs.work_dir }}/sbom-payload
+        RELEASE_TAG: ${{ inputs.release_tag }}
+      run: |
+        set -euo pipefail
+        [[ "$SYFT" == /* && -f "$SYFT" && ! -L "$SYFT" && -x "$SYFT" ]] || { echo "::error::syft must be an absolute path to the qualified binary"; exit 1; }
+        [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "::error::invalid release tag"; exit 1; }
+        for out in sbom.cdx.json sbom.spdx.json; do test ! -e "$RELEASE_DIR/$out" || { echo "::error::$out already exists"; exit 1; }; done
+        node "$SCRIPTS/unpack-targets.mjs" --release-dir "$RELEASE_DIR" --out "$PAYLOAD"
+        SYFT_CHECK_FOR_APP_UPDATE=false "$SYFT" scan "dir:$PAYLOAD" \
+          -o "cyclonedx-json=$RELEASE_DIR/sbom.cdx.json" -o "spdx-json=$RELEASE_DIR/sbom.spdx.json" \
+          --source-name "$GITHUB_REPOSITORY" --source-version "$RELEASE_TAG"

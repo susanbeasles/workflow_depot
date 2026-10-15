@@ -1,0 +1,46 @@
+name: Read application manifest
+description: >-
+  Loads and validates the application's application-deployment/v1 manifest and checks
+  that it names the calling repository (name and numeric id).
+inputs:
+  app_path:
+    description: Application checkout
+    required: true
+  manifest:
+    description: Manifest path relative to the application root
+    required: false
+    default: deployment/application.json
+  context_path:
+    description: release-context/v1 file from resolve-release-context
+    required: true
+  state_dir:
+    description: Directory for release hand-off files
+    required: true
+outputs:
+  application:
+    description: Application id
+    value: ${{ steps.read.outputs.application }}
+  worker_target:
+    description: cloudflare-worker/v1 target id, or empty
+    value: ${{ steps.read.outputs.worker_target }}
+  migrations_target:
+    description: cloudflare-d1-migrate/v1 target id, or empty
+    value: ${{ steps.read.outputs.migrations_target }}
+  application_path:
+    description: Path of the validated canonical manifest copy
+    value: ${{ steps.read.outputs.application_path }}
+runs:
+  using: composite
+  steps:
+    - id: read
+      shell: bash
+      env:
+        SCRIPTS: ${{ github.action_path }}/../../../ci/release
+        APP_PATH: ${{ inputs.app_path }}
+        MANIFEST: ${{ inputs.manifest }}
+        CONTEXT_PATH: ${{ inputs.context_path }}
+        STATE_DIR: ${{ inputs.state_dir }}
+      run: |
+        set -euo pipefail
+        node "$SCRIPTS/read-application.mjs" --app-root "$APP_PATH" --manifest "$MANIFEST" --context "$CONTEXT_PATH" --out "$STATE_DIR/application.json" --github-output "$GITHUB_OUTPUT"
+        printf 'application_path=%s\n' "$STATE_DIR/application.json" >> "$GITHUB_OUTPUT"

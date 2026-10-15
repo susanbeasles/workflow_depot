@@ -1,0 +1,26 @@
+name: Assemble release
+description: >-
+  Re-verifies every checksummed file and writes the deterministic release.zip
+  (bundles, authorization-policy.json, checksums.json, SBOMs).
+inputs:
+  release_dir:
+    description: Release output directory
+    required: true
+outputs:
+  sha256:
+    description: release.zip sha256
+    value: ${{ steps.assemble.outputs.sha256 }}
+  size_bytes:
+    description: release.zip size in bytes
+    value: ${{ steps.assemble.outputs.size_bytes }}
+runs:
+  using: composite
+  steps:
+    - id: assemble
+      shell: bash
+      env:
+        SCRIPTS: ${{ github.action_path }}/../../../ci/release
+        RELEASE_DIR: ${{ inputs.release_dir }}
+      run: |
+        set -euo pipefail
+        node "$SCRIPTS/assemble-release.mjs" --release-dir "$RELEASE_DIR" --github-output "$GITHUB_OUTPUT"

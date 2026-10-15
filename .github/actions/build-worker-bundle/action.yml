@@ -1,0 +1,112 @@
+name: Build worker bundle
+description: >-
+  Builds one cloudflare-worker/v1 target into targets/worker.zip (worker-artifact/v2 plus
+  static assets). Installs locked dependencies without lifecycle scripts, writes the app's
+  build-time release marker when scripts/write-release-marker.mjs exists, runs the target's
+  npm build script and `wrangler deploy --dry-run --outdir` with a minimal environment
+  (no tokens, no GitHub variables), then packages the output. No deployment happens here.
+inputs:
+  app_path:
+    description: Application checkout
+    required: true
+  application_path:
+    description: Validated application manifest from read-application-manifest
+    required: true
+  target:
+    description: cloudflare-worker/v1 target id
+    required: true
+  release_tag:
+    description: Release tag for the release marker
+    required: true
+  source_commit:
+    description: Source commit for the release marker
+    required: true
+  work_dir:
+    description: Scratch directory (must not already contain wrangler-<target>)
+    required: true
+  release_dir:
+    description: Release output directory
+    required: true
+outputs:
+  artifact_path:
+    description: Bundle path relative to release_dir
+    value: ${{ steps.bundle.outputs.artifact_path }}
+  sha256:
+    description: Bundle sha256
+    value: ${{ steps.bundle.outputs.sha256 }}
+runs:
+  using: composite
+  steps:
+    - id: plan
+      name: Validate target and wrangler config before running application code
+      shell: bash
+      env:
+        SCRIPTS: ${{ github.action_path }}/../../../ci/release
+        APP_PATH: ${{ inputs.app_path }}
+        APPLICATION_PATH: ${{ inputs.application_path }}
+        TARGET: ${{ inputs.target }}
+      run: |
+        set -euo pipefail
+        node "$SCRIPTS/build-worker-bundle.mjs" plan --app-root "$APP_PATH" --application "$APPLICATION_PATH" --target "$TARGET" --github-output "$GITHUB_OUTPUT"
+    - name: Install locked dependencies without lifecycle scripts
+      shell: bash
+      working-directory: ${{ inputs.app_path }}
+      run: |
+        set -euo pipefail
+        test -f package-lock.json || { echo "::error::package-lock.json is required"; exit 1; }
+        env -i PATH="$PATH" HOME="$HOME" CI=true npm ci --ignore-scripts --no-audit --no-fund
+    - name: Write build-time release marker
+      shell: bash
+      working-directory: ${{ inputs.app_path }}
+      env:
+        RELEASE_TAG: ${{ inputs.release_tag }}
+        SOURCE_COMMIT: ${{ inputs.source_commit }}
+      run: |
+        set -euo pipefail
+        [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ && "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::invalid release marker fields"; exit 1; }
+        if [[ -L scripts/write-release-marker.mjs ]]; then echo "::error::scripts/write-release-marker.mjs must not be a symlink"; exit 1; fi
+        if [[ -f scripts/write-release-marker.mjs ]]; then
+          # The module digest is unknown before bundling; the authoritative digest is
+          # carried by the RELEASE_MARKER plain_text binding added at packaging time.
+          placeholder=0000000000000000000000000000000000000000000000000000000000000000
+          env -i PATH="$PATH" HOME="$HOME" CI=true node scripts/write-release-marker.mjs "$RELEASE_TAG" "$SOURCE_COMMIT" "$placeholder"
+        else
+          echo "No scripts/write-release-marker.mjs; RELEASE_MARKER binding only"
+        fi
+    - name: Run the target build script
+      if: steps.plan.outputs.build_command != ''
+      shell: bash
+      working-directory: ${{ inputs.app_path }}
+      env:
+        BUILD_COMMAND: ${{ steps.plan.outputs.build_command }}
+      run: |
+        set -euo pipefail
+        [[ "$BUILD_COMMAND" =~ ^[a-z0-9][a-z0-9:._-]{0,63}$ ]] || { echo "::error::buildCommand must name an npm script"; exit 1; }
+        env -i PATH="$PATH" HOME="$HOME" CI=true NODE_ENV=production npm run "$BUILD_COMMAND"
+    - name: Bundle with wrangler (dry run, no credentials)
+      shell: bash
+      working-directory: ${{ inputs.app_path }}
+      env:
+        WRANGLER_CONFIG: ${{ steps.plan.outputs.wrangler_config }}
+        OUTDIR: ${{ inputs.work_dir }}/wrangler-${{ inputs.target }}
+      run: |
+        set -euo pipefail
+        test ! -e "$OUTDIR" || { echo "::error::wrangler output directory already exists"; exit 1; }
+        env -i PATH="$PATH" HOME="$HOME" CI=true WRANGLER_SEND_METRICS=false \
+          npx --no-install wrangler deploy --dry-run --outdir "$OUTDIR" --config "$WRANGLER_CONFIG"
+    - id: bundle
+      name: Package worker-artifact/v2 bundle
+      shell: bash
+      env:
+        SCRIPTS: ${{ github.action_path }}/../../../ci/release
+        APP_PATH: ${{ inputs.app_path }}
+        APPLICATION_PATH: ${{ inputs.application_path }}
+        TARGET: ${{ inputs.target }}
+        OUTDIR: ${{ inputs.work_dir }}/wrangler-${{ inputs.target }}
+        RELEASE_DIR: ${{ inputs.release_dir }}
+        RELEASE_TAG: ${{ inputs.release_tag }}
+        SOURCE_COMMIT: ${{ inputs.source_commit }}
+      run: |
+        set -euo pipefail
+        node "$SCRIPTS/build-worker-bundle.mjs" bundle --app-root "$APP_PATH" --application "$APPLICATION_PATH" --target "$TARGET" \
+          --wrangler-outdir "$OUTDIR" --out-dir "$RELEASE_DIR" --release-tag "$RELEASE_TAG" --source-commit "$SOURCE_COMMIT" --github-output "$GITHUB_OUTPUT"
