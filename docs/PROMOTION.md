@@ -36,27 +36,22 @@ which a caller cannot forge. Repositories do not call these actions themselves.
 
 It is staged at [`pipeline/pipeline.yml`](../pipeline/pipeline.yml), because `.github/workflows/` is protected.
 The owner installs it with one command; see [`pipeline/README.md`](../pipeline/README.md). Each repository adds
-[`pipeline/caller.yml`](../pipeline/caller.yml) as `.github/workflows/ci.yml`:
+[`pipeline/caller.yml`](../pipeline/caller.yml) as `.github/workflows/pipeline.yml`, next to its `pipeline.json`
+(the full stage map is [pipeline.md](pipeline.md)):
 
 ```yaml
-name: ci
+name: pipeline
 on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
-  push:
-    branches: ['shadow/pr-*']
+  pull_request: {branches: [main], types: [opened, synchronize, reopened, ready_for_review]}
+  push: {branches: [main, 'shadow/pr-*'], tags: ['v*.*.*']}
 permissions: {}
-concurrency:
-  group: pipeline-${{ github.ref }}
-  cancel-in-progress: true
+concurrency: {group: 'pipeline-${{ github.ref }}', cancel-in-progress: "${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}"}
 jobs:
   pipeline:
     uses: susanbeasles/workflow_depot/.github/workflows/pipeline.yml@0000000000000000000000000000000000000000 # REPLACE: reviewed workflow_depot SHA
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
+    permissions: {contents: write, id-token: write, attestations: write, security-events: write}
+    with: {depot_ref: '0000000000000000000000000000000000000000'}
+    secrets: {RELEASE_DISPATCH_TOKEN: '${{ secrets.RELEASE_DISPATCH_TOKEN }}'}
 ```
 
 | Job | Check name | Runs on | Needs |
@@ -64,7 +59,7 @@ jobs:
 | `lint-test` | `pipeline / lint-test` | PR and candidate | |
 | `quality` | `pipeline / quality` | PR and candidate | |
 | `security` | `pipeline / security` | PR and candidate | |
-| `build` | `pipeline / build` | PR and candidate | lint-test, quality, security |
+| `build` | `pipeline / build` | PR and candidate | lint-test, quality, security (and `config`; `security` also needs `security-assurance`) |
 | `shadow` | `pipeline / shadow` | `pull_request` into `main` (not drafts, not forks) | build |
 | `promote` | `pipeline / promote` | `push` to `shadow/pr-*` | build |
 

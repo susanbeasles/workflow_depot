@@ -1,9 +1,11 @@
 # pipeline: the reusable CI pipeline
 
-`pipeline/pipeline.yml` is the reusable workflow that every repository runs on its pull requests and shadow
-candidates. Contract: infra-root ADR-0002 section 1 (job ids, check names, needs), ADR-0001 section 1
-(promotion), [docs/PROMOTION.md](../docs/PROMOTION.md). It is staged here because `.github/workflows/` is
-protected; the owner installs it.
+`pipeline/pipeline.yml` is the orchestrator every repository calls for pull requests, shadow candidates, `main`
+and release tags: CONTROL-PLANE-SPEC section 5.6 stages 1 to 7, with the check names of infra-root ADR-0002
+section 1 and the promotion of ADR-0001 section 1 ([docs/PROMOTION.md](../docs/PROMOTION.md)). Stage map, what
+each existing workflow contributes and the open questions: [docs/pipeline.md](../docs/pipeline.md). Repository
+input: `pipeline.json`, [docs/contracts.md](../docs/contracts.md) section 12. It is staged here because
+`.github/workflows/` is protected; the owner installs it.
 
 ## Install (owner)
 
@@ -23,39 +25,41 @@ After that PR merges, for each repository:
    authorizer repository (`policy/actions.json` `pipeline_workflow.allowed_shas`, empty today). A caller pinned
    at a SHA presents `job_workflow_ref = ...pipeline.yml@<sha>`, so any other SHA gets `bad_workflow`. Promotion
    also stays off until the authorizer's `promotion_enabled` is set after ADR-0002 acceptance.
-2. Copy `pipeline/caller.yml` to the repository as `.github/workflows/ci.yml`, replacing
-   `0000000000000000000000000000000000000000` with that SHA. Keep the job id `pipeline` and add no `name:` to it.
+2. Copy `pipeline/caller.yml` to the repository as `.github/workflows/pipeline.yml`, replacing both
+   `0000000000000000000000000000000000000000` with that SHA (`uses:` and `depot_ref`), and add `pipeline.json` at
+   the repository root. Keep the job id `pipeline` and add no `name:` to it. workflow_depot itself must not use
+   that file name for a caller: its `.github/workflows/pipeline.yml` is this reusable workflow.
 3. The repository's Actions policy must allow `susanbeasles/workflow_depot`. The `shadow` and `promote` jobs
    check out workflow_depot with a token that has only `id-token: write`. That works while workflow_depot is
    public. If it becomes private, its Actions access setting must cover the caller repositories.
 
 ## What runs
 
-| Job | Check name | When | Needs | Permissions | Does |
-|---|---|---|---|---|---|
-| `lint-test` | `pipeline / lint-test` | every run | | `contents: read` | install, lint, typecheck, test |
-| `quality` | `pipeline / quality` | every run | | `contents: read` | actionlint, zizmor, lockfile check, commit messages |
-| `security` | `pipeline / security` | every run | | `contents: read` | gitleaks (tree and commit range), `npm audit` |
-| `build` | `pipeline / build` | every run | the three above | `contents: read`, `id-token: write`, `attestations: write` | build, package, `sha256`, upload, provenance attestation |
-| `shadow` | `pipeline / shadow` | non-draft `pull_request` into `main` from this repository | `build` | `id-token: write` | `actions/request-shadow` |
-| `promote` | `pipeline / promote` | `push` to `shadow/pr-*` | `build` | `id-token: write` | `actions/request-promotion` with the artifact digest |
+| Job | Stage | Check name | When | Needs | Permissions | Does |
+|---|---|---|---|---|---|---|
+| `config` | | `pipeline / config` | every run | | `contents: read`, `id-token: write` | `depot_ref` must equal the pinned SHA (`job_workflow_sha`); validates `pipeline.json` |
+| `lint-test` | 1 | `pipeline / lint-test` | every run | config | `contents: read` | install, lint, typecheck, test, coverage at the profile threshold |
+| `quality` | 2 | `pipeline / quality` | every run | config | `contents: read` | actionlint, zizmor, lockfile check, commit messages |
+| `security-assurance` | 3 | `pipeline / security-assurance / ...` | every run | config | `contents: read`, `security-events: write`, `id-token: write` | `.github/workflows/security-assurance.yml`: admission, analysis, final gate, signed evidence |
+| `security` | 3 | `pipeline / security` | unless cancelled | config, security-assurance | `contents: read` | security-assurance decision must be `PASS`; gitleaks (tree and commit range), `npm audit` |
+| `build` | 4 | `pipeline / build` | every run | config and the three above | `contents: read`, `id-token: write`, `attestations: write` | one build, package, `sha256`, upload, provenance attestation, `gh attestation verify`, CycloneDX and SPDX SBOM |
+| `shadow` | 5 | `pipeline / shadow` | non-draft `pull_request` into `main` from this repository | build | `id-token: write` | `actions/request-shadow` |
+| `promote` | 5 | `pipeline / promote` | `push` to `shadow/pr-*` | build | `id-token: write` | `actions/request-promotion` with the artifact digest |
+| `release` | 6 | `pipeline / release / ...` | `push` to `main` or a `v*` tag, `targets.applicationManifest` set | config, build | `contents: write`, `id-token: write`, `attestations: write` | `.github/workflows/release.yml` |
+| `deploy` | 7 | `pipeline / deploy (<target>) / ...` | stage 6 released, `targets.deploy` not empty | config, release | `contents: read` | `.github/workflows/request-deployment.yml`, one leg per target |
+| `infra-apply` | 7 | `pipeline / infra-apply` | terraform, `push` to `main` | config, build | none | fails closed: not wired |
 
-The first four run in parallel where they can. Callers need no configuration for a Node repository with a
-`package-lock.json`. Inputs, all optional:
+For `ecosystem: terraform`, the first step of `lint-test` and `build` fails closed (no pinned OpenTofu; no
+`terraform.plan` request), see docs/pipeline.md. Inputs:
 
 | Input | Default | |
 |---|---|---|
-| `node-version` | `24` | |
-| `working-directory` | `.` | where `package.json` lives |
-| `install` | `npm ci --ignore-scripts` | lifecycle scripts stay off |
-| `lint` / `typecheck` | `npm run lint --if-present` / `npm run typecheck --if-present` | |
-| `test` | `npm test` | empty skips it, with a warning |
-| `build` | `npm run build --if-present` | |
-| `artifact-path` | empty: `npm pack` output | a file, or a directory packed as a deterministic `tar.gz` |
+| `depot_ref` | required | the same full SHA as in `uses:`; `config` fails otherwise |
 | `require-attestation` | `true` | `false` only where GitHub attestations are unavailable |
 
-An empty command skips its step. Commands come from the caller's workflow file, never from PR content, and reach
-the shell only through `env:`.
+Secret, by name only, never `inherit`: `RELEASE_DISPATCH_TOKEN`, used only by `deploy`. Everything else comes from
+`pipeline.json`, validated by `ci/pipeline-config.mjs` in `config`. Commands are npm script names run as
+`npm run "$SCRIPT"`; values reach the shell only through `env:`.
 
 ## Security properties, and why
 
@@ -85,7 +89,10 @@ the shell only through `env:`.
   pedantic personas. The auditor persona reports only `misfeature` on `shell: node {0}`, which is deliberate
   (see "Embedded scripts").
 - No `${{ }}` appears in any `run:` block, which rules out template injection. Commit text and lockfile text
-  are escaped before they reach a workflow command.
+  are escaped before they reach a workflow command. Nothing is passed to `eval`.
+- Nested workflows are `./.github/workflows/<file>`: GitHub resolves them in this repository at the commit of
+  `pipeline.yml` itself, so the caller's SHA pins them too. `config` refuses a `depot_ref` other than that SHA,
+  so every workflow_depot checkout below it is the same commit.
 - `build` caches nothing. `lint-test` caches npm's tarball store only when a lockfile exists, and `npm ci`
   re-verifies every integrity hash.
 - `shadow` and `promote` run the request actions at **the workflow_depot commit `pipeline.yml` itself runs
@@ -122,23 +129,18 @@ node pipeline/embed.mjs --check  # exit 1 if pipeline.yml is stale
 
 | Script | Step | |
 |---|---|---|
-| `workflow-sha.cjs` | `shadow`, `promote`: route | `job_workflow_sha` from the job's OIDC token |
+| `workflow-sha.cjs` | `config`, `shadow`, `promote`: route | `job_workflow_sha` from the job's OIDC token |
+| `coverage-check.cjs` | `lint-test`: coverage | Istanbul json-summary `total.lines.pct` at or above the profile threshold |
 | `commitlint.cjs` | `quality`: commit messages | Conventional Commits. On PRs, every commit in `base..head`; merges skipped, `fixup!`/`squash!`/`amend!`/`Revert "` accepted because the promoter squashes them. On candidates, the commit itself, strictly; its message is the PR title |
 | `lockfile-check.cjs` | `quality`: lockfile | refuses a missing or v1 lockfile, drift from `package.json`, and any package that is not an https tarball with an integrity hash (sha1-only is a warning) |
 | `package.cjs` | `build`: package | `npm pack --ignore-scripts`, a file as is, or a directory as GNU tar sorted, mtime 0, owner 0, normalized modes, gzip mtime 0; outputs `artifact_digest=sha256:<hex>` |
 
 ## Not wired here
 
-- **security-assurance** (`security-assurance/`, `.github/workflows/security-assurance.yml`) is not called from
-  `security`, because it is neither self-contained nor offline-safe. It is its own reusable workflow of about 30
-  jobs. It downloads scanners and vulnerability databases at run time (trivy and grype DBs, ClamAV `freshclam`,
-  the OSV API), needs GitHub Advanced Security for CodeQL, uploads an evidence bundle, and signs with its own
-  workflow identity. Its own README says it still needs a first real run. Calling it as a nested reusable
-  workflow would add check names outside the ADR table and multiply the pipeline's run time. Gap: repositories
-  that want it call it from a separate caller workflow. Its `gate-decision.json` is not evidence the authorizer
-  reads today. A comment in `security` marks where a future, offline-capable hook belongs.
-- **Runner telemetry** (`actions/runner-telemetry`, ADR-0001 section 3) is built separately. A comment in
-  `lint-test` marks where it goes: first in each job, once it is reviewed and pinned.
+See docs/pipeline.md "Gaps and open questions": the terraform stage 1, 4 and 7 requests, the image path, private
+sourcemaps, a separate cosign signature on the build artifact, and stage 7 through the authorizer with OIDC.
+**Runner telemetry** (`actions/runner-telemetry`, ADR-0001 section 3) is built separately. A comment in
+`lint-test` marks where it goes: first in each job, once it is reviewed and pinned.
 
 ## For the owner: findings in existing workflows (protected path)
 
