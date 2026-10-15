@@ -18,6 +18,10 @@ name: Security Assurance
 on:
   workflow_call:
     inputs:
+      codeql_waive_languages:
+        description: "Space-separated CodeQL languages the caller waives (named in evidence; Semgrep still gates them). Example: swift"
+        type: string
+        default: ""
       integration_artifact_name:
         description: "Same-run immutable build artifact; empty keeps source-only behavior"
         type: string
@@ -366,7 +370,11 @@ jobs:
       - run: |
           echo "POLICY_REVISION=${{ needs.detect.outputs.policy_revision }}" >> "$GITHUB_ENV"
           echo "INPUT_TREE_DIGEST=$(git -C src rev-parse 'HEAD^{tree}')" >> "$GITHUB_ENV"
-      - uses: ./.security-depot/.github/actions/sast-codeql
+      - name: CodeQL waived by caller
+        if: ${{ contains(format(' {0} ', inputs.codeql_waive_languages), format(' {0} ', matrix.language)) }}
+        run: python3 .security-depot/.github/scripts/result.py --control "SAST-CODEQL-${{ matrix.language }}" --domain A --status NOT_APPLICABLE --reason "waived by caller (codeql_waive_languages); SAST-SEMGREP still gates this code" --tool codeql
+      - if: ${{ !contains(format(' {0} ', inputs.codeql_waive_languages), format(' {0} ', matrix.language)) }}
+        uses: ./.security-depot/.github/actions/sast-codeql
         with:
           source_path: src
           language: ${{ matrix.language }}

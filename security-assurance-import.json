@@ -39,7 +39,7 @@
     },
     {
       "path": ".github/actions/sast-semgrep/action.yml",
-      "sha256": "af6ccc2a4d8995e6d8d9b3994a7d88bd8eeff9aad2d6aa135031f712dd1a0868",
+      "sha256": "067fd83421e09302ee3b227d0e6f01a20e4ae30bc01608ed77d05bc66ab88ac4",
       "mode": 420
     },
     {
@@ -415,6 +415,12 @@
       "from_sha256": "f74863e748aa9e7760fdb21bbb5e41c2ceb26ada6965bed68b9213957d0fb939",
       "to_sha256": "a490464511023fb51f51e358b9627816a1b3fc99cb6488a8d9988b9de8fadfb5",
       "reason": "CodeQL supports only build-mode none for Rust; listing rust as requiring a build made CodeQL init fail ('Rust does not support the manual build mode') and SAST-CODEQL-rust report POLICY_UNAVAILABLE (porchlight main, Security run 38785256092). Rust is now a no-build language."
+    },
+    {
+      "path": ".github/actions/sast-semgrep/action.yml",
+      "from_sha256": "af6ccc2a4d8995e6d8d9b3994a7d88bd8eeff9aad2d6aa135031f712dd1a0868",
+      "to_sha256": "067fd83421e09302ee3b227d0e6f01a20e4ae30bc01608ed77d05bc66ab88ac4",
+      "reason": "Adds p/swift to the default Semgrep registry packs. Swift CodeQL needs a macOS runner; callers may waive it (codeql_waive_languages), and Semgrep then has to actually cover Swift code."
     }
   ]
 }

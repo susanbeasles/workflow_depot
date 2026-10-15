@@ -26,3 +26,10 @@ live = (root / ".github/workflows/security-assurance.yml").read_text()
 assert "actions/setup-python" not in live
 assert '/usr/bin/python3 -m venv --system-site-packages "$RUNNER_TEMP/pyenv"' in live
 print("s2 runtime regressions: ok")
+
+# A waived CodeQL language reports NOT_APPLICABLE by name; the others still run; Semgrep covers Swift.
+assert "codeql_waive_languages:" in live
+assert "--status NOT_APPLICABLE --reason \"waived by caller (codeql_waive_languages)" in live
+assert "if: ${{ !contains(format(' {0} ', inputs.codeql_waive_languages), format(' {0} ', matrix.language)) }}\n        uses: ./.security-depot/.github/actions/sast-codeql" in live
+assert " p/swift " in (sa / ".github/actions/sast-semgrep/action.yml").read_text()
+print("codeql waiver: ok")

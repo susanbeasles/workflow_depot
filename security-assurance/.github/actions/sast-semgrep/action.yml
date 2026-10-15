@@ -4,7 +4,7 @@ inputs:
   source_path: { description: Candidate checkout, required: true }
   rules_path: { description: Optional path to vendored rules (dir or file); empty = registry packs, default: "" }
   use_registry: { description: "true to also pull registry packs (network, unpinned). Depot rules always apply.", default: "true" }
-  registry_packs: { description: Registry packs when no vendored rules, default: "p/default p/security-audit p/secrets p/owasp-top-ten p/react p/typescript p/nodejs p/python p/rust p/github-actions p/docker p/terraform" }
+  registry_packs: { description: Registry packs when no vendored rules, default: "p/default p/security-audit p/secrets p/owasp-top-ten p/react p/typescript p/nodejs p/python p/rust p/swift p/github-actions p/docker p/terraform" }
 runs:
   using: composite
   steps:

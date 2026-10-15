@@ -51,6 +51,18 @@ def adapt(original):
  setup_py='        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0\n        with: { python-version: "3.12" }\n'
  assert text.count(setup_py)==1
  text=text.replace(setup_py,'        name: Python venv over the system interpreter (keeps its PyYAML)\n        run: |\n          /usr/bin/python3 -c "import yaml"\n          /usr/bin/python3 -m venv --system-site-packages "$RUNNER_TEMP/pyenv"\n          echo "$RUNNER_TEMP/pyenv/bin" >> "$GITHUB_PATH"\n')
+ # Caller-waived CodeQL languages (space-separated). A waived language reports NOT_APPLICABLE with the
+ # waiver in its reason, so it is named in the evidence instead of silently absent; the other
+ # languages still gate, and SAST-SEMGREP (which includes p/swift) still gates the waived code.
+ waive_in='      codeql_waive_languages:\n        description: "Space-separated CodeQL languages the caller waives (named in evidence; Semgrep still gates them). Example: swift"\n        type: string\n        default: ""\n'
+ text=text.replace('    inputs:\n','    inputs:\n'+waive_in,1)
+ codeql_step='      - uses: ./.security-depot/.github/actions/sast-codeql\n'
+ assert text.count(codeql_step)==1
+ waived="contains(format(' {0} ', inputs.codeql_waive_languages), format(' {0} ', matrix.language))"
+ text=text.replace(codeql_step,
+  "      - name: CodeQL waived by caller\n        if: ${{ "+waived+" }}\n"
+  "        run: python3 .security-depot/.github/scripts/result.py --control \"SAST-CODEQL-${{ matrix.language }}\" --domain A --status NOT_APPLICABLE --reason \"waived by caller (codeql_waive_languages); SAST-SEMGREP still gates this code\" --tool codeql\n"
+  "      - if: ${{ !"+waived+" }}\n        uses: ./.security-depot/.github/actions/sast-codeql\n")
  return text
 if __name__=='__main__':
  import pathlib
