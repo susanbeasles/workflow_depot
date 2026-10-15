@@ -65,6 +65,11 @@ def adapt(original):
   "      - name: CodeQL waived by caller\n        if: ${{ "+waived+" }}\n"
   "        run: python3 .security-depot/.github/scripts/result.py --control \"SAST-CODEQL-${{ matrix.language }}\" --domain A --status NOT_APPLICABLE --reason \"waived by caller (codeql_waive_languages); SAST-SEMGREP still gates this code\" --tool codeql\n"
   "      - if: ${{ !("+waived+") }}\n        uses: ./.security-depot/.github/actions/sast-codeql\n")
+ # CodeQL results are not uploaded to GitHub code scanning (sast-codeql: upload: never),
+ # so the job needs no security-events permission.
+ perm='    permissions: { contents: read, security-events: write }\n'
+ assert text.count(perm)==1
+ text=text.replace(perm,'    permissions: { contents: read }\n')
  return text
 if __name__=='__main__':
  import pathlib

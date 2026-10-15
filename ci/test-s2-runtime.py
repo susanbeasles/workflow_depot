@@ -49,3 +49,7 @@ with tempfile.TemporaryDirectory() as t:
 print("fail_on status: ok")
 assert 'echo "PIP_NO_CACHE_DIR=1" >> "$GITHUB_ENV"' in live
 print("pip cache isolation: ok")
+
+assert "security-events" not in live
+assert "upload: never" in (sa / ".github/actions/sast-codeql/action.yml").read_text()
+print("codeql local-only: ok")

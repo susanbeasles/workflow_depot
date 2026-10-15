@@ -84,7 +84,7 @@
     },
     {
       "path": ".github/actions/sast-codeql/action.yml",
-      "sha256": "fad3406810833ecd21f4ee66c0bc30ce721247f418c212ea87136ae00744213d",
+      "sha256": "0907a51b44ebc93fcf67d65282d27b1fb62ac4de74bec0751803a770f7371bfd",
       "mode": 420
     },
     {
@@ -439,6 +439,12 @@
       "from_sha256": "dc983469710125e257e229ddcda1da2357fb5bb8c1d64d921445c0b4f6529771",
       "to_sha256": "97101f20bc2c5b001c3830f0c346aad111f8293f7ada2b9575ee2df24660a42b",
       "reason": "Status followed the scanner's exit code, so exit 1 (any finding, even low or info) was FAIL. That ignored the policy's fail_on severities (release-policy.yml: semgrep critical/high, bandit high, shellcheck high) and bypassed reviewed accepted findings, which apply in count_blocking.py. Exit 0/1 now goes through count_blocking at the policy severities; any other exit, or a parse error, stays TOOL_FAILURE."
+    },
+    {
+      "path": ".github/actions/sast-codeql/action.yml",
+      "from_sha256": "fad3406810833ecd21f4ee66c0bc30ce721247f418c212ea87136ae00744213d",
+      "to_sha256": "0907a51b44ebc93fcf67d65282d27b1fb62ac4de74bec0751803a770f7371bfd",
+      "reason": "Owner decision: CodeQL runs centrally in the depot and gates there; results go into the signed evidence only and are not uploaded to GitHub code scanning (upload: never), so callers grant no security-events permission."
     }
   ]
 }

@@ -355,7 +355,7 @@ jobs:
     if: ${{ !inputs.admission_only && (needs.gate-stage0.outputs.decision == 'PASS' && needs.detect.outputs.codeql_languages != '[]') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    permissions: { contents: read, security-events: write }
+    permissions: { contents: read }
     strategy:
       fail-fast: false
       matrix:

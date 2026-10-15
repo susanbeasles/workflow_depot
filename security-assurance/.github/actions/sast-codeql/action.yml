@@ -39,7 +39,7 @@ runs:
       with:
         category: /language:${{ inputs.language }}
         output: ${{ runner.temp }}/codeql-sarif
-        upload: always
+        upload: never   # results gate here and go into the signed evidence; nothing is sent to GitHub code scanning
     - if: steps.pre.outputs.run == 'true'
       shell: bash
       run: |
