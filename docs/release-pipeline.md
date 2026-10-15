@@ -7,9 +7,12 @@ composed only of this repository's single-concern composite actions in `.github/
 which call the scripts in `ci/release/`. Contracts are in [contracts.md](contracts.md).
 
 ```
-bundle (contents: read)
+prepare (contents: read)
   compute-release-version -> resolve-release-context -> read-application-manifest
-  -> build-worker-bundle -> bundle-migrations -> write-authorization-policy -> generate-sbom
+worker-bundles (contents: read; one matrix leg per cloudflare-worker/v1 target)
+  build-worker-bundle
+bundle (contents: read)
+  bundle-migrations (every D1 target) -> write-authorization-policy -> generate-sbom
   -> checksum-bundles -> assemble-release -> write-release-manifest -> verify-release (unsigned)
 attest (contents: read, id-token: write, attestations: write)
   verify-release (unsigned) -> attest-release
@@ -82,9 +85,19 @@ Published on the GitHub Release (exact names):
 Every `targets/*.zip` additionally gets its own provenance attestation in the repository's
 attestation store, so per-target digests verify with `gh attestation verify`.
 
-Bundles: `targets/worker.zip` holds `artifact.json` (`workflow-depot-worker-artifact/v2`, module
-inline, asset digests only) and `assets/<path>`; `targets/migrations.zip` holds `ledger.json`
-(`migrations-ledger/v1`) and the SQL files byte-for-byte. One target per adapter is supported.
+Bundles: every target is bundled at `targets/<target-id>.zip` (ids are `^[a-z0-9-]{1,64}$`, unique,
+so paths stay flat). A worker bundle holds `artifact.json` (`workflow-depot-worker-artifact/v2`,
+module inline, asset digests only) and `assets/<path>`; a D1 bundle holds `ledger.json`
+(`migrations-ledger/v1`) and the SQL files byte-for-byte. Any number of targets per adapter is
+supported; ProsRUs ships `prosrus-d1-migrations`, the product `prosrus-worker` and the routeless
+`prosrus-replicator`.
+
+Health contracts are recorded per target in `release.meta.json` (`targets[].healthContract`) and in
+`authorization-policy.json` (`targets.<id>`), so the deployer knows which check to run:
+`http-release-marker/v1` (release marker over HTTP/RPC) or `worker-version/v1` (routeless Worker:
+`workers_dev: false`, no `preview_urls`, no assets, no route; proven by the active deployed version).
+The build rejects a `worker-version/v1` target whose wrangler config could be reachable by URL.
+Every worker bundle still carries its own `RELEASE_MARKER` binding with that bundle's module digest.
 
 ## Verifying a release
 
@@ -126,7 +139,7 @@ node /path/to/workflow_depot/ci/release/verify-release.mjs --release-dir . --sta
 Then check that `release.meta.json` names the expected `repository`, `repositoryId`, `releaseTag`
 and `sourceCommit`, and use `targets[].sha256` (equal to `checksums.json`) for each bundle. Per-target
 provenance: extract a bundle from `release.zip` and run
-`gh attestation verify targets/worker.zip --repo OWNER/APP --cert-identity "$IDENTITY" --cert-oidc-issuer "$ISSUER"`.
+`gh attestation verify targets/<target-id>.zip --repo OWNER/APP --cert-identity "$IDENTITY" --cert-oidc-issuer "$ISSUER"`.
 The cosign and `gh` flags above follow cosign v2.4+/v3 and current `gh`; confirm them against the
 installed versions when commissioning, since they could not be exercised offline here.
 
@@ -136,9 +149,9 @@ installed versions when commissioning, since they could not be exercised offline
 |---|---|
 | `compute-release-version` | `git log` since the last tag -> `released`, `release_tag`; verifies tag pushes point at the commit. |
 | `resolve-release-context` | Binds repository, numeric repository id, commit, ref and run to the tag (`release-context/v1`). |
-| `read-application-manifest` | Validates `application-deployment/v1` (strict keys, acyclic DAG, fixed adapters, normalized paths) and checks it names the calling repository. |
-| `build-worker-bundle` | `npm ci --ignore-scripts`, optional `scripts/write-release-marker.mjs <tag> <sha> <64 zeros>`, `npm run <buildCommand>`, `npx --no-install wrangler deploy --dry-run --outdir`, all with `env -i` (PATH, HOME, CI only); then packages `targets/worker.zip`. Rejects symlinks, special files, paths outside the app, extra modules and over-limit sizes. |
-| `bundle-migrations` | `targets/migrations.zip` + ledger; header directives `-- compatibility:` / `-- requires:`; every file in the directory must be a listed migration. |
+| `read-application-manifest` | Validates `application-deployment/v1` (strict keys, acyclic DAG, fixed adapters, normalized paths) and checks it names the calling repository. Outputs `worker_targets` and `migrations_targets` as JSON arrays; the first drives the worker matrix. |
+| `build-worker-bundle` | One target id per call (one matrix leg): `npm ci --ignore-scripts`, optional `scripts/write-release-marker.mjs <tag> <sha> <64 zeros>`, `npm run <buildCommand>` when declared, `npx --no-install wrangler deploy --dry-run --outdir`, all with `env -i` (PATH, HOME, CI only); then packages `targets/<target-id>.zip`. Rejects symlinks, special files, paths outside the app, extra modules and over-limit sizes. |
+| `bundle-migrations` | Takes the JSON array of D1 target ids; writes `targets/<target-id>.zip` + ledger per target; header directives `-- compatibility:` / `-- requires:`; every file in the directory must be a listed migration. |
 | `write-authorization-policy` | `authorization-policy.json`; expiry = source commit time + 365 days. |
 | `generate-sbom` | Strict unpack of the bundles, then syft (installed and digest-checked by `security-assurance`'s `install-tool`). |
 | `checksum-bundles` | `checksums.json` + `SHA256SUMS`; stray files fail. |
@@ -164,11 +177,14 @@ installed versions when commissioning, since they could not be exercised offline
   `plain_text` binding (canonical `release-marker/v1` without `startedAt`), where `artifactSha256` is the
   sha256 of the bundled `worker.mjs`. The v2 validator checks that digest; `verify-release` checks the
   marker against the manifest.
-- **Bindings are claims.** `vars` become `plain_text`, D1/R2/KV/service/queue/DO bindings keep the
-  wrangler ids, and the deployer re-resolves them against the Terraform registry. Wrangler keys owned by
-  Terraform or the deployer (routes, `env`, cron triggers, queue consumers, custom `build`, cross-script
-  DOs, R2 jurisdictions, unknown keys) fail the build; `workers_dev`, `preview_urls` and `observability`
-  are ignored.
+- **Bindings are claims.** `vars` become `plain_text`, D1/R2/KV/service/queue-producer/DO bindings keep
+  the wrangler ids, and the deployer re-resolves them against the Terraform registry.
+  `secrets_store_secrets` entries become `{"name": binding, "type": "inherit"}`; their `store_id` and
+  `secret_name` are dropped (the root path owns those bindings). `triggers.crons` and `queues.consumers`
+  are infrastructure-owned: they are recorded under `metadata.declared` (validated and bounded) for the
+  deployer to compare with the registry and are never authority. Routes, `env`, custom `build`,
+  cross-script DOs, R2 jurisdictions, unsupported consumer settings and unknown keys fail the build;
+  `workers_dev`, `preview_urls` and `observability` are not carried (except the routeless check above).
 - **Write-once.** GitHub: draft-then-publish so `GET /releases/tags/{tag}` never shows a partial asset
   set; a failure after the draft leaves it for an operator (never auto-deleted). R2: `412` on any key
   stops publication; partial uploads without `release.meta.json` are unreachable. Re-running a failed
@@ -183,10 +199,10 @@ installed versions when commissioning, since they could not be exercised offline
   admission URL/audience from the Terraform registry, the current generation and the GitHub Deployment id.
 - Source signature verification (`verify-source` in contracts §9) is not implemented; tag pushes are
   checked to point at the commit, but tag/commit signatures are not verified.
-- Not supported (fails closed): more than one target per adapter, multi-step Durable Object migrations,
+- Not supported (fails closed): multi-step Durable Object migrations,
   `wrangler.toml`, JSON `vars`, additional modules (wasm, chunks), `.assetsignore`/`_headers`/`_redirects`.
-- Secrets are not inferred: wrangler config has no secret list, so the artifact carries no `inherit`
-  bindings; the deployer must keep existing secret bindings.
+- Only Secrets Store bindings declared in wrangler config become `inherit` bindings; secrets set with
+  `wrangler secret put` are not listed in the config, so the deployer must keep them.
 - The SBOM covers the release payload; bundled JavaScript without package manifests yields sparse
   component lists (syft's documented blind spot).
 - Artifact attestations for private repositories depend on the GitHub plan; check before commissioning.

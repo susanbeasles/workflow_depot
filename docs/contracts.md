@@ -29,7 +29,10 @@ Naming (fixed):
      "dependsOn": [], "recoveryPolicy": "forward-only"},
     {"id": "prosrus-worker", "adapter": "cloudflare-worker/v1",
      "build": {"wranglerConfig": "wrangler.jsonc", "entry": "src/worker.ts", "assetsDir": "dist", "buildCommand": "build"},
-     "dependsOn": ["prosrus-d1-migrations"], "healthContract": "http-release-marker/v1"}
+     "dependsOn": ["prosrus-d1-migrations"], "healthContract": "http-release-marker/v1"},
+    {"id": "prosrus-replicator", "adapter": "cloudflare-worker/v1",
+     "build": {"wranglerConfig": "wrangler.replicator.jsonc", "entry": "src/replicator/worker.ts"},
+     "dependsOn": ["prosrus-d1-migrations"], "healthContract": "worker-version/v1"}
   ],
   "environments": {
     "staging":    {"allowedRefs": ["refs/heads/main"], "requiredApprovals": 0},
@@ -39,10 +42,14 @@ Naming (fixed):
 ```
 Rules: target ids `^[a-z0-9-]{1,64}$`, DAG acyclic, adapters only from the fixed set, build paths relative,
 normalized, inside the repo, no `..`. `buildCommand` names an npm script; it is never a shell string.
+Any number of targets per adapter; each is bundled at `targets/<target-id>.zip`. Worker targets may omit `assetsDir`
+and `buildCommand` (no assets, no npm build). `healthContract` is `http-release-marker/v1` (§8) or `worker-version/v1`
+(routeless Worker: no route, `workers_dev: false`, no assets; the deployer proves the release by the active deployed
+version, not HTTP). Release manifest and authorization policy record the contract per target.
 
 ## 2. Bundles produced by Build
 
-`targets/worker.zip` (one per `cloudflare-worker/v1` target):
+`targets/<target-id>.zip` for each `cloudflare-worker/v1` target (e.g. `targets/prosrus-worker.zip`):
 ```
 artifact.json            worker-artifact/v2 (below) — module content inline, asset BYTES not inline
 assets/<path>            static files, normalized relative paths, regular files only
@@ -60,16 +67,22 @@ assets/<path>            static files, normalized relative paths, regular files 
                      and durable_object_namespace MAY use {"class_name"} (same-script) instead of namespace_id */ ],
     "migrations": {"new_tag": "v1", "new_sqlite_classes": ["Coordinator"]},   // optional, DO migrations only
     "assets": {"config": {"not_found_handling": "single-page-application", "run_worker_first": true},
-               "manifest": [{"path": "index.html", "sha256": "…", "sizeBytes": 1, "contentType": "text/html"}]}
+               "manifest": [{"path": "index.html", "sha256": "…", "sizeBytes": 1, "contentType": "text/html"}]},
+    "declared": {"crons": ["*/5 * * * *"],                                      // optional; infrastructure-owned
+                 "queueConsumers": [{"queue": "…", "maxBatchSize": 10, "maxRetries": 5, "deadLetterQueue": "…"}]}
   },
   "modules": [{"name": "worker.mjs", "type": "esm", "content": "…"}]
 }
 ```
 Limits: module ≤ 5 MiB, assets ≤ 20,000 files / 25 MiB each / 100 MiB total, paths `^[A-Za-z0-9._~/-]+$`, no `..`.
 Resource ids in bindings (database_id, bucket_name, queue_name, service) are **claims**; the deployer resolves
-the real ids from the Terraform registry (§7) and rejects mismatches. Secrets are `inherit` only.
+the real ids from the Terraform registry (§7) and rejects mismatches. Secrets are `inherit` only: wrangler
+`secrets_store_secrets: [{binding, store_id, secret_name}]` becomes `{"name": binding, "type": "inherit"}` (store_id and
+secret_name are not carried; the root path owns that binding). `declared` records wrangler `triggers.crons` and
+`queues.consumers` so the deployer can compare them with the registry; it is never authority. Queue producers are
+`queue` bindings. Every worker bundle carries its own `RELEASE_MARKER` (§8) whose `artifactSha256` is its `worker.mjs` digest.
 
-`targets/migrations.zip`:
+`targets/<target-id>.zip` for each `cloudflare-d1-migrate/v1` target (e.g. `targets/prosrus-d1-migrations.zip`):
 ```
 ledger.json              migrations-ledger/v1
 NNNN_name.sql            exact bytes from the repo
@@ -92,18 +105,21 @@ increasing, every file in the dir listed, `compatibility` from a leading `-- com
   "builder": {"workflow": "susanbeasles/workflow_depot/.github/workflows/release.yml@<40-hex>", "runId": "…", "runAttempt": "1"},
   "artifact": {"path": "release.zip", "sha256": "…", "sizeBytes": 1, "mediaType": "application/zip"},
   "targets": [
-    {"id": "prosrus-d1-migrations", "adapter": "cloudflare-d1-migrate/v1", "artifactPath": "targets/migrations.zip",
+    {"id": "prosrus-d1-migrations", "adapter": "cloudflare-d1-migrate/v1", "artifactPath": "targets/prosrus-d1-migrations.zip",
      "sha256": "…", "sizeBytes": 1, "dependsOn": [], "recoveryPolicy": "forward-only"},
-    {"id": "prosrus-worker", "adapter": "cloudflare-worker/v1", "artifactPath": "targets/worker.zip",
-     "sha256": "…", "sizeBytes": 1, "dependsOn": ["prosrus-d1-migrations"], "healthContract": "http-release-marker/v1"}
+    {"id": "prosrus-worker", "adapter": "cloudflare-worker/v1", "artifactPath": "targets/prosrus-worker.zip",
+     "sha256": "…", "sizeBytes": 1, "dependsOn": ["prosrus-d1-migrations"], "healthContract": "http-release-marker/v1"},
+    {"id": "prosrus-replicator", "adapter": "cloudflare-worker/v1", "artifactPath": "targets/prosrus-replicator.zip",
+     "sha256": "…", "sizeBytes": 1, "dependsOn": ["prosrus-d1-migrations"], "healthContract": "worker-version/v1"}
   ],
   "authorizationPolicy": {"path": "authorization-policy.json", "sha256": "…"},
   "checksums": {"path": "checksums.json", "sha256": "…"}
 }
 ```
 `release.zip` contains: `release.meta.json`? NO — the manifest describes the zip and is stored beside it.
-`release.zip` = `targets/*.zip` + `authorization-policy.json` + `checksums.json` + `sbom.cdx.json` (if produced).
-Manifest digest = sha256(canonical JSON of the manifest). `release.sig` = cosign bundle over `release.meta.json`.
+`release.zip` = `targets/*.zip` + `authorization-policy.json` + `checksums.json` + `sbom.cdx.json`/`sbom.spdx.json` (if produced).
+Manifest digest = sha256(canonical JSON of the manifest). `release.meta.json.sigstore.json` and `release.zip.sigstore.json`
+are the cosign bundles (published beside them; this replaces the earlier `release.sig` name).
 
 ## 4. `authorization-policy/v1` — `authorization-policy.json`
 Produced by Build from `deployment/application.json` + workflow identity; consumed by admission (other agent).
@@ -119,16 +135,21 @@ Produced by Build from `deployment/application.json` + workflow identity; consum
   "releaseTag": "v1.0.0",
   "signer": {"issuer": "https://token.actions.githubusercontent.com",
              "identity": "https://github.com/susanbeasles/workflow_depot/.github/workflows/release.yml@<40-hex>"},
+  "targets": {
+    "prosrus-d1-migrations": {"adapter": "cloudflare-d1-migrate/v1", "recoveryPolicy": "forward-only"},
+    "prosrus-worker":        {"adapter": "cloudflare-worker/v1", "healthContract": "http-release-marker/v1"},
+    "prosrus-replicator":    {"adapter": "cloudflare-worker/v1", "healthContract": "worker-version/v1"}
+  },
   "environments": {
-    "staging":    {"allowedRefs": ["refs/heads/main"], "requiredApprovals": 0, "targets": ["prosrus-d1-migrations","prosrus-worker"]},
-    "production": {"allowedRefs": ["refs/tags/v*"],    "requiredApprovals": 1, "targets": ["prosrus-d1-migrations","prosrus-worker"]}
+    "staging":    {"allowedRefs": ["refs/heads/main"], "requiredApprovals": 0, "targets": ["prosrus-d1-migrations","prosrus-worker","prosrus-replicator"]},
+    "production": {"allowedRefs": ["refs/tags/v*"],    "requiredApprovals": 1, "targets": ["prosrus-d1-migrations","prosrus-worker","prosrus-replicator"]}
   },
   "expiresAt": "2027-10-15T00:00:00Z"
 }
 ```
 
 ## 5. `release-checksums/v1` — `checksums.json` (+ `SHA256SUMS` text, same content)
-`{"schema":"release-checksums/v1","algorithm":"sha256","files":{"targets/worker.zip":{"sha256","sizeBytes"}, … }}`
+`{"schema":"release-checksums/v1","algorithm":"sha256","files":{"targets/prosrus-worker.zip":{"sha256","sizeBytes"}, … }}`
 Covers every bundle, `authorization-policy.json`, `sbom.cdx.json`; computed once, verified again before signing and before publish.
 
 ## 6. `promotion-request/v1` (RFC 4.1) — built by the Deploy phase, POSTed with a GitHub OIDC token
@@ -169,3 +190,64 @@ no absolute/`..` paths, bomb ratio ≤ 100×, ≤ 20k entries) → attest-releas
 → publish-release-objects (R2, `If-None-Match: *` on every key; temp key then finalize `release.meta.json` last).
 Each step is one composite action in `workflow_depot/.github/actions/<name>/action.yml`, single concern,
 inputs/outputs only, no secrets except the publish steps, all `uses:` pinned to 40-hex SHAs.
+
+## 10. Recovery and backup (owner decisions, 2026-10-15) — binding
+
+Capture: every committed change is an immutable hash-chained `recovery_transactions` row plus its `recovery_outbox`
+job, written in the SAME D1 batch (existing maintained save path). Writes that bypass this path are not allowed.
+Files are immutable content-addressed originals (sha256); only new content is copied; no binary diffs.
+
+Storage per environment (Terraform root stack):
+- `job-stack-<env>-uploads`  temporary upload chunks; lifecycle deletes objects after 7 days, aborts multipart after 1 day; NO lock.
+- `job-stack-<env>-originals` retained originals; prefix lock `blobs/` Age 30 days (time-bounded); no lifecycle delete.
+  Current originals are preserved while their records remain active; deletion only via a reviewed retention operation.
+- `job-stack-<env>-backup`   independent destination; bound ONLY to the replicator Worker (Product has no binding).
+  Layout and protection:
+    changes/<workspaceId>/<sequence 20-digit zero-padded>-<transactionDigest>.json   lock Age 30d,  lifecycle delete 31d
+    receipts/<workspaceId>/<sequence 20-digit>.json                                   lock Age 30d,  lifecycle delete 31d
+    checkpoints/daily/<workspaceId>/<YYYY-MM-DD>/manifest.json (+ tables/<table>.ndjson) lock Age 90d,  lifecycle delete 91d
+    checkpoints/monthly/<workspaceId>/<YYYY-MM>/manifest.json  (+ tables/<table>.ndjson) lock Age 365d, lifecycle delete 366d
+    objects/sha256/<first 2 hex>/<sha256>                                             lock Age 365d, NO lifecycle;
+      garbage-collected by the replicator only when unreferenced by every retained checkpoint, every retained change
+      and every current original, and only after its lock has expired.
+  Every put is conditional create-only; an existing object with the same digest is "matched_existing", a different digest is a fault.
+
+Replicator Worker `job-stack-<env>-replicator` (separate identity, same repo, `src/replicator/`, `wrangler.replicator.jsonc`):
+bindings DB, ORIGINALS (read), BACKUP (write), JOBS queue consumer (wake-ups; at-least-once), crons:
+`*/5 * * * *` sweep due outbox jobs (covers lost messages), `23 3 * * *` daily checkpoint + GC, monthly checkpoint on day 1.
+Ordered per workspace: transaction N is replicated and verified only after N-1 has a receipt. Lease/fence from the existing
+outbox; duplicate delivery and crash-after-put are idempotent (matched_existing, one receipt).
+
+`recovery-checkpoint/v1` manifest: {schema, checkpointId, kind daily|monthly, workspace {ownerId, workspaceId},
+position {epochId, sequence, transactionDigest}, schemaVersion (latest applied D1 migration version), tables:[{name,
+objectKey, sha256, rows}], files:[{sha256, sizeBytes, objectKey}], previousCheckpointId|null, createdAt}; manifest digest =
+sha256(canonical JSON). A checkpoint is "verified" only after every table and file object is read back and re-hashed.
+Recorded in D1 table `recovery_checkpoints` (append-only, immutable triggers).
+
+Restore (operator procedure, never in-place): choose newest retained verified checkpoint ≤ target → load tables into a NEW
+D1 database at the checkpoint's schema version → replay changes in sequence order verifying previous_digest linkage up to the
+target → verify every referenced file in backup objects/ (re-hash) and copy to a new originals bucket → emit restore report.
+Changes recorded under a newer schema version than the restore database are replayed only after the matching migrations apply.
+
+Read operation `job_stack_recovery_status` (effect read, scope `job-stack.protection.read`, owner-json + mcp), input
+`{workspaceId}`, output `recovery-status-v1`:
+{format:'recovery-status-v1', workspaceId,
+ state:'protected'|'protection_pending'|'delayed'|'degraded'|'failed'|'unavailable',
+ head:{sequence, committedAt}|null,
+ latestVerified:{sequence, transactionDigest, verifiedAt}|null,
+ latestCheckpoint:{checkpointId, kind, position:{sequence}, verifiedAt}|null,
+ lag:{pendingTransactions, oldestPendingAt|null, seconds|null},
+ deadLetters, observedAt}
+`protected` ONLY when latestVerified.sequence == head.sequence AND a verified checkpoint exists within 26h; pending work is
+`protection_pending` (lag ≤ 15 min) or `delayed` (> 15 min); dead letters → `failed`; never label pending as protected.
+D1 Time Travel is an additional platform layer, not independent protection, and is never reported as `protected`.
+
+## 11. Infrastructure state (owner decisions) — binding
+Dedicated `tf-state` bucket separate from application storage; backend with verified locking (`use_lockfile = true`);
+OpenTofu state encryption (key from Secrets Store `TF_ENCRYPTION_INFRA`, supplied via `TF_ENCRYPTION`, never in Git);
+before each apply the deployer archives the current state with lineage/serial, source commit, tool/provider versions and the
+reviewed plan digest to an independent destination under unique names; the live state object is never locked.
+State, saved plans and credentials never enter Git. Restoring state changes Terraform's record, not reality: reconcile
+against actual resources and review the plan before any apply. Recovery chain: restore configuration → recover/reconcile
+state → recover infrastructure as needed → restore application data. New environments pin OpenTofu `= 1.10.6`.
+Workers and buckets are created/adopted by the root provisioning path; `cf-apply` restrictions stay intact.
