@@ -1,7 +1,7 @@
 name: Build worker bundle
 description: >-
-  Builds one cloudflare-worker/v1 target into targets/worker.zip (worker-artifact/v2 plus
-  static assets). Installs locked dependencies without lifecycle scripts, writes the app's
+  Builds one cloudflare-worker/v1 target into targets/<target-id>.zip (worker-artifact/v2
+  plus static assets; crons and queue consumers recorded under metadata.declared). Installs locked dependencies without lifecycle scripts, writes the app's
   build-time release marker when scripts/write-release-marker.mjs exists, runs the target's
   npm build script and `wrangler deploy --dry-run --outdir` with a minimal environment
   (no tokens, no GitHub variables), then packages the output. No deployment happens here.

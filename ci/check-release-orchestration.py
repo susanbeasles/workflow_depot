@@ -102,19 +102,42 @@ assert release["permissions"] == {}, (
     "release.yml must declare permissions: {} at the top level"
 )
 jobs = release["jobs"]
-assert list(jobs) == ["bundle", "attest", "publish", "publish-objects"], (
-    "unexpected release jobs"
-)
-assert "needs" not in jobs["bundle"]
+assert list(jobs) == [
+    "prepare",
+    "worker-bundles",
+    "bundle",
+    "attest",
+    "publish",
+    "publish-objects",
+], "unexpected release jobs"
+assert "needs" not in jobs["prepare"]
+assert jobs["worker-bundles"]["needs"] == "prepare"
+assert jobs["bundle"]["needs"] == ["prepare", "worker-bundles"]
 assert jobs["attest"]["needs"] == "bundle"
-assert jobs["publish"]["needs"] == ["bundle", "attest"]
-assert jobs["publish-objects"]["needs"] == ["bundle", "publish"]
-assert jobs["attest"]["if"] == "needs.bundle.outputs.released == 'true'"
+assert jobs["publish"]["needs"] == ["prepare", "attest"]
+assert jobs["publish-objects"]["needs"] == ["prepare", "publish"]
+# Status-check functions would let later jobs run after a failed predecessor.
+for job_name in ["attest", "publish"]:
+    assert "if" not in jobs[job_name], (
+        f"{job_name}: must inherit success() of its needs"
+    )
+matrix = jobs["worker-bundles"]["strategy"]
+assert (
+    matrix["matrix"]["target"]
+    == "${{ fromJSON(needs.prepare.outputs.worker_targets) }}"
+)
+assert matrix["fail-fast"] == "true"
+assert "needs.prepare.outputs.worker_targets != '[]'" in jobs["worker-bundles"]["if"]
+bundle_if = jobs["bundle"]["if"]
+assert bundle_if.startswith("!cancelled() && needs.prepare.result == 'success'")
+assert "needs.worker-bundles.result == 'success'" in bundle_if
 assert (
     "inputs.r2_account_id != ''" in jobs["publish-objects"]["if"]
     and "inputs.r2_bucket != ''" in jobs["publish-objects"]["if"]
 )
 expected_permissions = {
+    "prepare": {"contents": "read"},
+    "worker-bundles": {"contents": "read"},
     "bundle": {"contents": "read"},
     "attest": {"contents": "read", "id-token": "write", "attestations": "write"},
     "publish": {"contents": "write"},
@@ -156,11 +179,19 @@ def sequence(job_name):
     return [a for a in map(local_action, jobs[job_name]["steps"]) if a]
 
 
-assert sequence("bundle") == [
+assert sequence("prepare") == [
     "compute-release-version",
     "resolve-release-context",
     "read-application-manifest",
-    "build-worker-bundle",
+], sequence("prepare")
+assert sequence("worker-bundles") == ["build-worker-bundle"]
+build = next(
+    s
+    for s in jobs["worker-bundles"]["steps"]
+    if local_action(s) == "build-worker-bundle"
+)
+assert build["with"]["target"] == "${{ matrix.target }}"
+assert sequence("bundle") == [
     "bundle-migrations",
     "write-authorization-policy",
     "generate-sbom",
@@ -179,11 +210,16 @@ for job_name in ["publish", "publish-objects"]:
     assert verify["with"]["stage"] == "signed", (
         f"{job_name}: verify signed bundles before publication"
     )
-upload = jobs["bundle"]["steps"][-2]
-assert (
-    upload["uses"].startswith("actions/upload-artifact@")
-    and upload["if"] == "steps.version.outputs.released == 'true'"
+migrations = next(
+    s for s in jobs["bundle"]["steps"] if local_action(s) == "bundle-migrations"
 )
+assert (
+    migrations["with"]["targets"] == "${{ needs.prepare.outputs.migrations_targets }}"
+)
+upload = jobs["bundle"]["steps"][-2]
+assert upload["uses"].startswith("actions/upload-artifact@")
+assert upload["with"]["name"] == "release-${{ github.sha }}"
 print(
-    "Verified release.yml: bundle -> attest -> publish -> optional R2, least-privilege jobs, pinned uses, strict composite actions."
+    "Verified release.yml: prepare -> worker matrix -> bundle -> attest -> publish -> optional R2, "
+    "least-privilege jobs, pinned uses, strict composite actions."
 )

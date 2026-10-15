@@ -20,12 +20,12 @@ outputs:
   application:
     description: Application id
     value: ${{ steps.read.outputs.application }}
-  worker_target:
-    description: cloudflare-worker/v1 target id, or empty
-    value: ${{ steps.read.outputs.worker_target }}
-  migrations_target:
-    description: cloudflare-d1-migrate/v1 target id, or empty
-    value: ${{ steps.read.outputs.migrations_target }}
+  worker_targets:
+    description: JSON array of cloudflare-worker/v1 target ids (drives the worker build matrix)
+    value: ${{ steps.read.outputs.worker_targets }}
+  migrations_targets:
+    description: JSON array of cloudflare-d1-migrate/v1 target ids
+    value: ${{ steps.read.outputs.migrations_targets }}
   application_path:
     description: Path of the validated canonical manifest copy
     value: ${{ steps.read.outputs.application_path }}

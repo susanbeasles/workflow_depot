@@ -1,6 +1,6 @@
 name: Bundle D1 migrations
 description: >-
-  Packages a cloudflare-d1-migrate/v1 target into targets/migrations.zip with a
+  Packages every listed cloudflare-d1-migrate/v1 target into targets/<target-id>.zip with a
   migrations-ledger/v1. SQL is copied byte-for-byte and never executed.
 inputs:
   app_path:
@@ -9,30 +9,22 @@ inputs:
   application_path:
     description: Validated application manifest from read-application-manifest
     required: true
-  target:
-    description: cloudflare-d1-migrate/v1 target id
+  targets:
+    description: JSON array of cloudflare-d1-migrate/v1 target ids (read-application-manifest output; may be [])
     required: true
   release_dir:
     description: Release output directory
     required: true
-outputs:
-  artifact_path:
-    description: Bundle path relative to release_dir
-    value: ${{ steps.bundle.outputs.artifact_path }}
-  sha256:
-    description: Bundle sha256
-    value: ${{ steps.bundle.outputs.sha256 }}
 runs:
   using: composite
   steps:
-    - id: bundle
-      shell: bash
+    - shell: bash
       env:
         SCRIPTS: ${{ github.action_path }}/../../../ci/release
         APP_PATH: ${{ inputs.app_path }}
         APPLICATION_PATH: ${{ inputs.application_path }}
-        TARGET: ${{ inputs.target }}
+        TARGETS: ${{ inputs.targets }}
         RELEASE_DIR: ${{ inputs.release_dir }}
       run: |
         set -euo pipefail
-        node "$SCRIPTS/bundle-migrations.mjs" --app-root "$APP_PATH" --application "$APPLICATION_PATH" --target "$TARGET" --out-dir "$RELEASE_DIR" --github-output "$GITHUB_OUTPUT"
+        node "$SCRIPTS/bundle-migrations.mjs" --app-root "$APP_PATH" --application "$APPLICATION_PATH" --targets "$TARGETS" --out-dir "$RELEASE_DIR"
