@@ -10,8 +10,10 @@ ask. Wiring, the caller workflow and the rulesets: [docs/PROMOTION.md](docs/PROM
 
 ## CI pipeline
 
-`pipeline/pipeline.yml` is the reusable pipeline (`lint-test`, `quality`, `security`, `build`, `shadow`, `promote`) that
-every repository calls with `pipeline/caller.yml`. It is staged outside `.github/workflows/`, which is protected; the
+`pipeline/pipeline.yml` is the orchestrator every repository calls with `pipeline/caller.yml` and a `pipeline.json`:
+lint and test, quality, security-assurance, build, promotion (`shadow`, `promote`), release (`release.yml`) and the
+deploy request, in that order. Stage map and gaps: [docs/pipeline.md](docs/pipeline.md); `pipeline.json`:
+[docs/contracts.md](docs/contracts.md) section 12. It is staged outside `.github/workflows/`, which is protected; the
 owner installs it. Install and inputs: [pipeline/README.md](pipeline/README.md).
 
 `actions/runner-telemetry` measures CPU, memory, disk and network on a Linux runner for the caretaker dashboard: [docs/TELEMETRY.md](docs/TELEMETRY.md).

@@ -1,0 +1,13 @@
+{
+  "schema": "workflow-depot-pipeline/v1",
+  "ecosystem": "npm",
+  "policyProfile": "ci-baseline",
+  "workingDirectory": ".",
+  "runtime": { "node": "24.10.0" },
+  "scripts": { "lint": "lint", "typecheck": "typecheck", "test": "test:coverage", "build": "build" },
+  "rebuild": ["esbuild", "workerd"],
+  "coverage": { "summary": "coverage/coverage-summary.json" },
+  "build": { "outputDirectory": "dist" },
+  "image": null,
+  "targets": { "applicationManifest": "deployment/application.json", "deploy": ["personal-control"] }
+}

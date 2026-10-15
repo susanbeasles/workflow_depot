@@ -1,52 +1,40 @@
-# The reusable CI pipeline: infra-root ADR-0002 section 1. Staged at pipeline/pipeline.yml in
-# susanbeasles/workflow_depot; the owner installs it byte for byte at .github/workflows/pipeline.yml
-# (pipeline/README.md). Callers use pipeline/caller.yml, whose calling job id is `pipeline`, so the
-# check names are `pipeline / <job>`. The authorizer requires those names: do not rename jobs or add `name:`.
+# The orchestrator: every repository's single CI/CD entry point (infra-root CONTROL-PLANE-SPEC 5.6, ADR-0001
+# section 1, ADR-0002 section 1). Staged at pipeline/pipeline.yml in susanbeasles/workflow_depot; the owner
+# installs it byte for byte at .github/workflows/pipeline.yml (pipeline/README.md). Stage map: docs/pipeline.md.
 #
-# Commands come from the caller's workflow file (inputs), never from pull request content. They reach the
-# shell through `env:` only: no `${{ }}` appears inside any `run:` block (pipeline/test enforces it).
+#   config (pipeline.json, depot_ref == pinned SHA)
+#     -> lint-test (1)   quality (2)   security-assurance (3, reusable) -> security (3 gate)
+#     -> build (4; terraform: terraform.plan, not wired)
+#     -> shadow (5, pull_request)  |  promote (5, push shadow/pr-*)
+#     -> release (6, push main or vX.Y.Z tag, reusable release.yml)
+#     -> deploy (7, after a release, reusable request-deployment.yml)  |  infra-apply (7, terraform, not wired)
+#
+# Callers use a caller whose calling job id is `pipeline`, so the check names are `pipeline / <job>`. The
+# authorizer requires `pipeline / lint-test`, `quality`, `security` and `build` exactly: do not rename those
+# jobs or add another `name:`. Nested workflows are referenced as ./.github/workflows/<file>, which GitHub
+# resolves to this repository at the same commit as this file, so they are pinned by the caller's SHA.
+#
+# Repository input is pipeline.json (docs/contracts.md section 12), validated by ci/pipeline-config.mjs in the
+# config job; later jobs read only its validated outputs, and those reach the shell through `env:` only: no
+# `${{ }}` appears inside any `run:` block (pipeline/test enforces it).
 # Steps marked `# embedded:` are pipeline/scripts/*.cjs copied in by `node pipeline/embed.mjs`.
 name: pipeline
 
 on:
   workflow_call:
     inputs:
-      node-version:
-        description: Node.js version for install, lint, test and build.
+      depot_ref:
+        description: Full 40-hex workflow_depot commit; must equal the SHA this workflow is pinned to in `uses:`.
         type: string
-        default: '24'
-      working-directory:
-        description: Directory holding package.json, relative to the repository root.
-        type: string
-        default: .
-      install:
-        description: Install command. Empty skips it. Lifecycle scripts stay off unless you change this.
-        type: string
-        default: npm ci --ignore-scripts
-      lint:
-        description: Lint command. Empty skips it.
-        type: string
-        default: npm run lint --if-present
-      typecheck:
-        description: Type-check command. Empty skips it.
-        type: string
-        default: npm run typecheck --if-present
-      test:
-        description: Test command. Empty skips it, with a warning.
-        type: string
-        default: npm test
-      build:
-        description: Build command, run before packaging. Empty skips it.
-        type: string
-        default: npm run build --if-present
-      artifact-path:
-        description: File or directory (relative to working-directory) to package and attest. Empty packages `npm pack` output.
-        type: string
-        default: ''
+        required: true
       require-attestation:
         description: Attest build provenance for the artifact. Set false only where attestations are unavailable.
         type: boolean
         default: true
+    secrets:
+      RELEASE_DISPATCH_TOKEN:
+        description: Stage 7 only. Actions write on the central deployment receiver; needed when pipeline.json lists deploy targets.
+        required: false
     outputs:
       artifact_digest:
         description: sha256:<hex> of the packaged artifact.
@@ -63,62 +51,271 @@ on:
       tag:
         description: shadow/pr-* runs, the provenance tag.
         value: ${{ jobs.promote.outputs.tag }}
+      released:
+        description: main and tag runs, 'true' when stage 6 published a release.
+        value: ${{ jobs.release.outputs.released }}
+      release_tag:
+        description: main and tag runs, the published vX.Y.Z (empty when nothing was released).
+        value: ${{ jobs.release.outputs.releaseTag }}
 
 permissions: {}
 
 jobs:
+  config:
+    name: config
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read # sparse checkout of the caller's pipeline.json
+      id-token: write # routing claim only (audience workflow-depot-route): binds depot_ref to this file's commit
+    outputs:
+      ecosystem: ${{ steps.read.outputs.ecosystem }}
+      policy_profile: ${{ steps.read.outputs.policy_profile }}
+      working_directory: ${{ steps.read.outputs.working_directory }}
+      node_version: ${{ steps.read.outputs.node_version }}
+      script_lint: ${{ steps.read.outputs.script_lint }}
+      script_typecheck: ${{ steps.read.outputs.script_typecheck }}
+      script_test: ${{ steps.read.outputs.script_test }}
+      script_build: ${{ steps.read.outputs.script_build }}
+      rebuild: ${{ steps.read.outputs.rebuild }}
+      coverage_summary: ${{ steps.read.outputs.coverage_summary }}
+      coverage_min: ${{ steps.read.outputs.coverage_min }}
+      output_directory: ${{ steps.read.outputs.output_directory }}
+      release: ${{ steps.read.outputs.release }}
+      application_manifest: ${{ steps.read.outputs.application_manifest }}
+      deploy_targets: ${{ steps.read.outputs.deploy_targets }}
+      terraform_plan: ${{ steps.read.outputs.terraform_plan }}
+      terraform_apply: ${{ steps.read.outputs.terraform_apply }}
+    steps:
+      - name: Find the workflow_depot commit this pipeline runs at
+        id: route
+        shell: node {0}
+        # embedded: pipeline/scripts/workflow-sha.cjs
+        run: |
+          'use strict';
+          // pipeline/scripts/workflow-sha.cjs: find the workflow_depot commit this reusable workflow runs at.
+          // Embedded byte for byte in pipeline.yml (shell: node {0}); pipeline/test checks that the two match.
+          // It reads this job's OIDC token, decodes the job_workflow_sha claim and writes `sha=<40 hex>` to
+          // GITHUB_OUTPUT. The signature is not checked: this only picks which commit to check out, and the
+          // authorizer verifies its own token. The token's audience is accepted by no service, so a leaked
+          // token is worthless. The token is never printed.
+          const { appendFileSync } = require('node:fs');
+
+          const AUDIENCE = 'workflow-depot-route';
+          const WORKFLOW = 'susanbeasles/workflow_depot/.github/workflows/pipeline.yml@';
+          const SHA = /^[0-9a-f]{40}$/;
+
+          class RouteError extends Error {}
+
+          function decodeClaims(jwt) {
+            const parts = typeof jwt === 'string' ? jwt.split('.') : [];
+            if (parts.length !== 3 || !/^[A-Za-z0-9_-]+$/.test(parts[1])) throw new RouteError('OIDC token is not a JWT');
+            let claims;
+            try {
+              claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+            } catch {
+              throw new RouteError('OIDC token payload is not JSON');
+            }
+            if (claims === null || typeof claims !== 'object' || Array.isArray(claims)) throw new RouteError('OIDC token payload is not an object');
+            return claims;
+          }
+
+          function workflowSha(claims) {
+            const ref = claims.job_workflow_ref;
+            if (typeof ref !== 'string' || !ref.startsWith(WORKFLOW) || ref.length === WORKFLOW.length) {
+              throw new RouteError('job_workflow_ref is not susanbeasles/workflow_depot pipeline.yml: run this job only inside the reusable pipeline');
+            }
+            const sha = claims.job_workflow_sha;
+            if (typeof sha !== 'string' || !SHA.test(sha)) throw new RouteError('job_workflow_sha is missing or not 40 lowercase hex');
+            return sha;
+          }
+
+          async function oidcToken(env, fetchImpl) {
+            const url = env.ACTIONS_ID_TOKEN_REQUEST_URL;
+            const bearer = env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+            if (!url || !bearer) throw new RouteError('no OIDC token available: the job needs `permissions: id-token: write`');
+            const target = new URL(url);
+            target.searchParams.set('audience', AUDIENCE);
+            const res = await fetchImpl(target, { headers: { authorization: `bearer ${bearer}` }, redirect: 'error', signal: AbortSignal.timeout(15000) });
+            if (res.status !== 200) throw new RouteError(`OIDC token request failed with ${res.status}`);
+            const text = await res.text();
+            if (text.length > 16384) throw new RouteError('OIDC token response too large');
+            let value;
+            try {
+              value = JSON.parse(text).value;
+            } catch {
+              throw new RouteError('OIDC token response is not JSON');
+            }
+            if (typeof value !== 'string') throw new RouteError('OIDC token response has no token');
+            return value;
+          }
+
+          async function main(env = process.env, fetchImpl = fetch, log = console.log) {
+            const sha = workflowSha(decodeClaims(await oidcToken(env, fetchImpl)));
+            if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, `sha=${sha}\n`);
+            log(`workflow_depot pipeline.yml runs at ${sha}`);
+            return sha;
+          }
+
+          module.exports = { AUDIENCE, WORKFLOW, RouteError, decodeClaims, workflowSha, oidcToken, main };
+
+          if (require.main === module) {
+            main().catch((error) => {
+              console.log(`::error title=workflow-sha::${error instanceof RouteError ? error.message : 'unexpected failure'}`);
+              process.exitCode = 1;
+            });
+          }
+      - name: depot_ref must equal the pinned SHA
+        env:
+          DEPOT_REF: ${{ inputs.depot_ref }}
+          PINNED_SHA: ${{ steps.route.outputs.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$DEPOT_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "::error title=depot_ref::depot_ref must be a full 40-hex commit SHA"; exit 1; }
+          [ "$DEPOT_REF" = "$PINNED_SHA" ] || { echo "::error title=depot_ref::depot_ref $DEPOT_REF is not the SHA this pipeline is pinned to ($PINNED_SHA); pass the SHA from uses:"; exit 1; }
+          echo "depot_ref equals the pinned workflow_depot commit $PINNED_SHA"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: susanbeasles/workflow_depot
+          ref: ${{ inputs.depot_ref }}
+          path: .workflow-depot
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: src
+          persist-credentials: false
+          sparse-checkout: /pipeline.json
+          sparse-checkout-cone-mode: false
+      - name: Validate pipeline.json
+        id: read
+        run: |
+          set -euo pipefail
+          test "$(git -C .workflow-depot rev-parse HEAD)" = "$DEPOT_REF"
+          node .workflow-depot/ci/pipeline-config.mjs --app-root src --config pipeline.json --github-output "$GITHUB_OUTPUT"
+        env:
+          DEPOT_REF: ${{ inputs.depot_ref }}
+
   lint-test:
-    name: lint-test # the check name is `pipeline / lint-test`; the authorizer requires it exactly
+    name: lint-test # stage 1; the check name is `pipeline / lint-test`; the authorizer requires it exactly
+    needs: config
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
     defaults:
       run:
-        working-directory: ${{ inputs.working-directory }}
+        working-directory: ${{ needs.config.outputs.working_directory }}
     steps:
       # Telemetry hook: actions/runner-telemetry (built separately) goes first in each job once reviewed and pinned.
+      - name: Stage 1 for terraform is not wired
+        if: needs.config.outputs.ecosystem == 'terraform'
+        working-directory: .
+        run: |
+          echo "::error title=lint-test::terraform stage 1 needs a pinned, checksum-verified OpenTofu; workflow_depot has none (security-assurance/policy/tool-registry.yml). See docs/pipeline.md, open questions."
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: ${{ inputs.node-version }}
+          node-version: ${{ needs.config.outputs.node_version }}
           package-manager-cache: false
           # Cache npm's tarball store only when there is a lockfile; `npm ci` re-verifies every integrity hash.
-          cache: ${{ hashFiles(format('{0}/package-lock.json', inputs.working-directory)) != '' && 'npm' || '' }}
-          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+          cache: ${{ hashFiles(format('{0}/package-lock.json', needs.config.outputs.working_directory)) != '' && 'npm' || '' }}
+          cache-dependency-path: ${{ needs.config.outputs.working_directory }}/package-lock.json
       - name: Install
         env:
-          CMD: ${{ inputs.install }}
+          REBUILD: ${{ needs.config.outputs.rebuild }}
         run: |
-          if [ -z "${CMD//[[:space:]]/}" ]; then echo "install: skipped (empty)"; exit 0; fi
-          echo "+ $CMD"
-          eval "$CMD"
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          # Install scripts run only for the packages pipeline.json names in `rebuild`.
+          read -r -a packages <<< "$REBUILD"
+          if [ "${#packages[@]}" -gt 0 ]; then npm rebuild "${packages[@]}" --ignore-scripts=false --foreground-scripts; fi
       - name: Lint
         env:
-          CMD: ${{ inputs.lint }}
-        run: |
-          if [ -z "${CMD//[[:space:]]/}" ]; then echo "lint: skipped (empty)"; exit 0; fi
-          echo "+ $CMD"
-          eval "$CMD"
+          SCRIPT: ${{ needs.config.outputs.script_lint }}
+        run: npm run "$SCRIPT"
       - name: Typecheck
         env:
-          CMD: ${{ inputs.typecheck }}
-        run: |
-          if [ -z "${CMD//[[:space:]]/}" ]; then echo "typecheck: skipped (empty)"; exit 0; fi
-          echo "+ $CMD"
-          eval "$CMD"
+          SCRIPT: ${{ needs.config.outputs.script_typecheck }}
+        run: npm run "$SCRIPT"
       - name: Test
         env:
-          CMD: ${{ inputs.test }}
+          SCRIPT: ${{ needs.config.outputs.script_test }}
+        run: npm run "$SCRIPT"
+      - name: Coverage
+        env:
+          COVERAGE_SUMMARY: ${{ needs.config.outputs.coverage_summary }}
+          COVERAGE_MIN: ${{ needs.config.outputs.coverage_min }}
+        shell: node {0}
+        # embedded: pipeline/scripts/coverage-check.cjs
         run: |
-          if [ -z "${CMD//[[:space:]]/}" ]; then echo "::warning title=test::the test input is empty; nothing was tested"; exit 0; fi
-          echo "+ $CMD"
-          eval "$CMD"
+          'use strict';
+          // pipeline/scripts/coverage-check.cjs: stage 1 coverage gate. Embedded byte for byte in pipeline.yml
+          // (shell: node {0}); pipeline/test checks that the two match. Runs in the caller's working directory after the
+          // test script. COVERAGE_SUMMARY is the Istanbul json-summary path from pipeline.json and COVERAGE_MIN the line
+          // threshold of the policy profile, both validated by ci/pipeline-config.mjs in the config job and checked again
+          // here. Fails unless total.lines.pct reaches the threshold over a non-empty line count.
+          const { appendFileSync, lstatSync, readFileSync } = require('node:fs');
+          const path = require('node:path');
+
+          const MAX_BYTES = 8 * 1024 * 1024;
+          const RELATIVE = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/;
+
+          class CoverageError extends Error {}
+
+          function check(cwd, summaryPath, min) {
+            if (typeof summaryPath !== 'string' || !RELATIVE.test(summaryPath) || summaryPath.split('/').some((s) => s === '.' || s === '..')) {
+              throw new CoverageError('COVERAGE_SUMMARY must be a normalized relative path');
+            }
+            const threshold = Number(min);
+            if (!/^[1-9][0-9]?$|^100$/.test(String(min)) || !Number.isInteger(threshold)) throw new CoverageError('COVERAGE_MIN must be an integer from 1 to 100');
+            const file = path.join(cwd, summaryPath);
+            let stat;
+            try {
+              stat = lstatSync(file);
+            } catch {
+              throw new CoverageError(`${summaryPath} does not exist: the test script must write an Istanbul json-summary report there`);
+            }
+            if (!stat.isFile()) throw new CoverageError(`${summaryPath} must be a regular file, not a symlink or directory`);
+            if (stat.size > MAX_BYTES) throw new CoverageError(`${summaryPath} is larger than ${MAX_BYTES} bytes`);
+            let data;
+            try {
+              data = JSON.parse(readFileSync(file, 'utf8'));
+            } catch {
+              throw new CoverageError(`${summaryPath} is not JSON`);
+            }
+            const lines = data !== null && typeof data === 'object' ? data.total?.lines : undefined;
+            if (lines === null || typeof lines !== 'object' || !Number.isInteger(lines.total) || lines.total <= 0 || typeof lines.pct !== 'number' || !Number.isFinite(lines.pct)) {
+              throw new CoverageError(`${summaryPath} has no total.lines with a positive line count`);
+            }
+            return { pct: lines.pct, covered: lines.covered, total: lines.total, threshold, ok: lines.pct >= threshold };
+          }
+
+          function main(env = process.env, cwd = process.cwd(), log = console.log) {
+            const result = check(cwd, env.COVERAGE_SUMMARY, env.COVERAGE_MIN);
+            const line = `line coverage ${result.pct}% (${result.covered}/${result.total}); threshold ${result.threshold}%`;
+            if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, `### Coverage\n\n${result.ok ? 'PASS' : 'FAIL'}: ${line}\n`);
+            if (result.ok) log(`coverage: ${line}`);
+            else log(`::error title=coverage::${line}`);
+            return result;
+          }
+
+          module.exports = { CoverageError, check, main };
+
+          if (require.main === module) {
+            try {
+              if (!main().ok) process.exitCode = 1;
+            } catch (error) {
+              console.log(`::error title=coverage::${error instanceof CoverageError ? error.message : 'unexpected failure'}`);
+              process.exitCode = 1;
+            }
+          }
 
   quality:
-    name: quality # the check name is `pipeline / quality`; the authorizer requires it exactly
+    name: quality # stage 2; the check name is `pipeline / quality`; the authorizer requires it exactly
+    needs: config
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -166,7 +363,7 @@ jobs:
           # apply; they are visible in review. Medium and high findings fail the job.
           "$RUNNER_TEMP/pipeline-bin/zizmor" --offline --no-config --no-progress --min-severity=medium --format=github .github/workflows
       - name: Lockfile
-        working-directory: ${{ inputs.working-directory }}
+        working-directory: ${{ needs.config.outputs.working_directory }}
         shell: node {0}
         # embedded: pipeline/scripts/lockfile-check.cjs
         run: |
@@ -359,13 +556,41 @@ jobs:
             }
           }
 
+  security-assurance:
+    # Stage 3: the intact security-assurance module, stage 0 admission then stage 2 analysis, final gate, signed
+    # evidence bundle. A reusable workflow: its jobs report as `pipeline / security-assurance / <job>`, and the
+    # `security` job below turns its decision into the `pipeline / security` check the authorizer reads.
+    needs: config
+    permissions:
+      contents: read
+      security-events: write # CodeQL results
+      id-token: write # evidence-sign: keyless cosign signature of the evidence bundle
+    uses: ./.github/workflows/security-assurance.yml
+    with:
+      depot_repository: susanbeasles/workflow_depot
+      depot_ref: ${{ inputs.depot_ref }}
+      policy_profile: ${{ needs.config.outputs.policy_profile }}
+
   security:
-    name: security # the check name is `pipeline / security`; the authorizer requires it exactly
+    name: security # stage 3 gate; the check name is `pipeline / security`; the authorizer requires it exactly
+    needs: [config, security-assurance]
+    # Runs even when security-assurance failed, so the check is red rather than skipped.
+    if: ${{ !cancelled() && needs.config.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
     steps:
+      - name: security-assurance final gate decision
+        env:
+          DECISION: ${{ needs.security-assurance.outputs.decision }}
+          RESULT: ${{ needs.security-assurance.result }}
+        run: |
+          if [ "$DECISION" != PASS ]; then
+            echo "::error title=security-assurance::final gate decision is '${DECISION:-none}' (job result: $RESULT); evidence: the security-evidence-<sha> artifact"
+            exit 1
+          fi
+          echo "security-assurance: PASS (stage 0 admission, stage 2 analysis, signed evidence bundle)"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -411,57 +636,59 @@ jobs:
           "$gl" git --no-banner --redact --config "$cfg" --gitleaks-ignore-path "$ignore" --log-opts="$range" . || rc=1
           exit "$rc"
       - name: npm audit (production dependencies, high and critical)
-        working-directory: ${{ inputs.working-directory }}
+        working-directory: ${{ needs.config.outputs.working_directory }}
         run: |
           if [ ! -f package.json ]; then echo "npm audit: no package.json here; skipped"; exit 0; fi
           # The public registry and the threshold are fixed here: a repository .npmrc cannot redirect or relax them.
           npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org/
-      # Hook: security-assurance (security-assurance/README.md) is not wired here. It is a separate reusable
-      # workflow of about 30 jobs that downloads scanners and vulnerability databases at run time, needs GitHub
-      # Advanced Security for CodeQL and takes far longer than this job. Call
-      # .github/workflows/security-assurance.yml from its own caller workflow; see pipeline/README.md.
 
   build:
-    name: build # the check name is `pipeline / build`; the authorizer requires it exactly
-    needs: [lint-test, quality, security]
+    name: build # stage 4; the check name is `pipeline / build`; the authorizer requires it exactly
+    needs: [config, lint-test, quality, security]
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write # Sigstore signing certificate for the provenance attestation
-      attestations: write # store the attestation for the artifact digest
+      attestations: write # store the attestation for the artifact digest, and read it back to verify
     outputs:
       artifact_digest: ${{ steps.package.outputs.artifact_digest }}
     defaults:
       run:
-        working-directory: ${{ inputs.working-directory }}
+        working-directory: ${{ needs.config.outputs.working_directory }}
     steps:
+      - name: Stage 4 for terraform is terraform.plan in the runner (not wired)
+        if: needs.config.outputs.ecosystem == 'terraform'
+        working-directory: .
+        env:
+          PLAN: ${{ needs.config.outputs.terraform_plan }}
+        run: |
+          echo "::error title=build::stage 4 for terraform is '$PLAN' in the runner, requested from the authorizer with OIDC; workflow_depot has no action for that request yet. See docs/pipeline.md, open questions."
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: ${{ inputs.node-version }}
+          node-version: ${{ needs.config.outputs.node_version }}
           # No dependency cache in the job that produces the attested artifact.
           package-manager-cache: false
       - name: Install
         env:
-          CMD: ${{ inputs.install }}
+          REBUILD: ${{ needs.config.outputs.rebuild }}
         run: |
-          if [ -z "${CMD//[[:space:]]/}" ]; then echo "install: skipped (empty)"; exit 0; fi
-          echo "+ $CMD"
-          eval "$CMD"
-      - name: Build
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          read -r -a packages <<< "$REBUILD"
+          if [ "${#packages[@]}" -gt 0 ]; then npm rebuild "${packages[@]}" --ignore-scripts=false --foreground-scripts; fi
+      - name: Build (the one production build)
         env:
-          CMD: ${{ inputs.build }}
-        run: |
-          if [ -z "${CMD//[[:space:]]/}" ]; then echo "build: skipped (empty)"; exit 0; fi
-          echo "+ $CMD"
-          eval "$CMD"
+          SCRIPT: ${{ needs.config.outputs.script_build }}
+        run: npm run "$SCRIPT"
       - name: Package
         id: package
         env:
-          ARTIFACT_PATH: ${{ inputs.artifact-path }}
+          ARTIFACT_PATH: ${{ needs.config.outputs.output_directory }}
           OUT_DIR: ${{ runner.temp }}/pipeline-artifact
         shell: node {0}
         # embedded: pipeline/scripts/package.cjs
@@ -569,9 +796,53 @@ jobs:
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: ${{ steps.package.outputs.artifact_file }}
+      - name: Verify the attestation (gh attestation verify)
+        if: inputs.require-attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_FILE: ${{ steps.package.outputs.artifact_file }}
+          DEPOT_REF: ${{ inputs.depot_ref }}
+        run: |
+          set -euo pipefail
+          gh attestation verify "$ARTIFACT_FILE" --repo "$GITHUB_REPOSITORY" --deny-self-hosted-runners \
+            --cert-identity "https://github.com/susanbeasles/workflow_depot/.github/workflows/pipeline.yml@$DEPOT_REF" \
+            --cert-oidc-issuer https://token.actions.githubusercontent.com
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: susanbeasles/workflow_depot
+          ref: ${{ inputs.depot_ref }}
+          path: .workflow-depot
+          persist-credentials: false
+      - name: Materialize the security-assurance module for its qualified tool installer
+        working-directory: .
+        run: |
+          set -euo pipefail
+          mkdir .security-depot
+          cp -a -- .workflow-depot/security-assurance/. .security-depot/
+      - id: syft
+        uses: ./.security-depot/.github/actions/install-tool
+        with:
+          tool: syft
+      - name: SBOM (CycloneDX and SPDX) of the build output
+        env:
+          SYFT: ${{ steps.syft.outputs.bin }}
+          OUTPUT_DIRECTORY: ${{ needs.config.outputs.output_directory }}
+          SBOM_DIR: ${{ runner.temp }}/pipeline-sbom
+        run: |
+          set -euo pipefail
+          mkdir -p "$SBOM_DIR"
+          SYFT_CHECK_FOR_APP_UPDATE=false "$SYFT" scan "dir:$OUTPUT_DIRECTORY" \
+            -o "cyclonedx-json=$SBOM_DIR/sbom.cdx.json" -o "spdx-json=$SBOM_DIR/sbom.spdx.json" \
+            --source-name "$GITHUB_REPOSITORY" --source-version "$GITHUB_SHA"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pipeline-sbom
+          path: ${{ runner.temp }}/pipeline-sbom/
+          if-no-files-found: error
+          overwrite: true
 
   shadow:
-    name: shadow # the check name is `pipeline / shadow`; the authorizer requires it exactly
+    name: shadow # stage 5 (pull request); the check name is `pipeline / shadow`; the authorizer requires it exactly
     # Non-draft pull requests from this repository into main. Drafts run every stage but never ask for a
     # candidate; marking the PR ready (caller: `ready_for_review`) starts the run that does.
     if: >-
@@ -678,7 +949,7 @@ jobs:
           node .workflow-depot/actions/request-shadow/main.mjs
 
   promote:
-    name: promote # the check name is `pipeline / promote`; the authorizer requires it exactly
+    name: promote # stage 5 (candidate); the check name is `pipeline / promote`; the authorizer requires it exactly
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/shadow/pr-')
     needs: build
     runs-on: ubuntu-24.04
@@ -782,3 +1053,53 @@ jobs:
         run: |
           test "$(git -C .workflow-depot rev-parse HEAD)" = "$DEPOT_SHA"
           node .workflow-depot/actions/request-promotion/main.mjs
+
+  release:
+    # Stage 6, only on main and on vX.Y.Z tags, after stages 1 to 4 passed on this exact commit. The universal
+    # release workflow at this same commit; depot_ref is its signing identity (release.yml@<depot_ref>).
+    needs: [config, build]
+    if: >-
+      github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) &&
+      needs.config.outputs.release == 'true'
+    permissions:
+      contents: write # publish job: the write-once GitHub Release
+      id-token: write # attest job: keyless signing
+      attestations: write # attest job: build provenance
+    uses: ./.github/workflows/release.yml
+    with:
+      depot_ref: ${{ inputs.depot_ref }}
+      application_manifest: ${{ needs.config.outputs.application_manifest }}
+
+  deploy:
+    # Stage 7, only after stage 6 published a release, one leg per registered target. request-deployment.yml
+    # itself refuses anything but a main push.
+    needs: [config, release]
+    # request-deployment.yml accepts only refs/heads/main; tag releases skip stage 7.
+    if: github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true' && needs.config.outputs.deploy_targets != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.config.outputs.deploy_targets) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/request-deployment.yml
+    with:
+      target: ${{ matrix.target }}
+      depot_ref: ${{ inputs.depot_ref }}
+    secrets:
+      RELEASE_DISPATCH_TOKEN: ${{ secrets.RELEASE_DISPATCH_TOKEN }}
+
+  infra-apply:
+    name: infra-apply # stage 7 for terraform repositories: terraform.apply or root.apply in the runner
+    needs: [config, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.config.outputs.ecosystem == 'terraform'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: terraform.apply or root.apply request (not wired)
+        env:
+          APPLY: ${{ needs.config.outputs.terraform_apply }}
+        run: |
+          echo "::error title=infra-apply::stage 7 for terraform is '$APPLY' in the runner, requested from the authorizer with OIDC; workflow_depot has no action for that request yet. See docs/pipeline.md, open questions."
+          exit 1

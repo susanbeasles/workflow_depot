@@ -1,0 +1,18 @@
+{
+  "schema": "workflow-depot-pipeline/v1",
+  "ecosystem": "terraform",
+  "policyProfile": "ci-baseline",
+  "workingDirectory": ".",
+  "runtime": { "opentofu": "1.10.6" },
+  "terraform": { "plan": "terraform.plan", "apply": "terraform.apply" },
+  "image": null,
+  "targets": {
+    "stacks": [
+      "environments/staging/prosrus",
+      "environments/production/prosrus",
+      "environments/production/backup",
+      "environments/production/backup-execution",
+      "environments/production/provisioner"
+    ]
+  }
+}

@@ -16,6 +16,7 @@ const route = require('../scripts/workflow-sha.cjs');
 const commitlint = require('../scripts/commitlint.cjs');
 const lockfile = require('../scripts/lockfile-check.cjs');
 const pkg = require('../scripts/package.cjs');
+const coverage = require('../scripts/coverage-check.cjs');
 
 const SHA_A = 'a'.repeat(40);
 const scratch = () => mkdtempSync(path.join(tmpdir(), 'pipeline-test-'));
@@ -348,6 +349,50 @@ test('package: refuses no package.json, missing paths, paths outside the workspa
   assert.throws(() => pkg.packageArtifact({ ...opts, outDir: undefined, artifactPath: 'bad name.txt' }), /no output directory/);
   rmSync(ws, { recursive: true });
   rmSync(outside, { recursive: true });
+});
+
+// ---- coverage-check.cjs -------------------------------------------------------------------------
+
+function summaryDir(total) {
+  const dir = scratch();
+  mkdirSync(path.join(dir, 'coverage'));
+  if (total !== undefined) writeFileSync(path.join(dir, 'coverage', 'coverage-summary.json'), JSON.stringify({ total }));
+  return dir;
+}
+const LINES = (pct, covered = 80, total = 100) => ({ lines: { total, covered, skipped: 0, pct } });
+
+test('coverage-check: passes at or above the threshold, fails below it, and reports both', () => {
+  const env = (min) => ({ COVERAGE_SUMMARY: 'coverage/coverage-summary.json', COVERAGE_MIN: min });
+  const ok = summaryDir(LINES(80));
+  assert.equal(coverage.check(ok, 'coverage/coverage-summary.json', '80').ok, true);
+  const logs = [];
+  assert.equal(coverage.main(env('80'), ok, (l) => logs.push(l)).ok, true);
+  assert.match(logs[0], /^coverage: line coverage 80% \(80\/100\); threshold 80%$/);
+  const low = summaryDir(LINES(79.99, 7999, 10000));
+  const fail = [];
+  assert.equal(coverage.main(env('80'), low, (l) => fail.push(l)).ok, false);
+  assert.match(fail[0], /^::error title=coverage::line coverage 79\.99%/);
+  assert.equal(coverage.check(low, 'coverage/coverage-summary.json', '90').ok, false);
+});
+
+test('coverage-check: refuses missing, empty, malformed, symlinked and climbing summaries and bad thresholds', () => {
+  const missing = summaryDir();
+  assert.throws(() => coverage.check(missing, 'coverage/coverage-summary.json', '80'), /does not exist/);
+  for (const total of [{}, { lines: { total: 0, covered: 0, pct: 'Unknown' } }, { lines: { total: 10, covered: 5, pct: 'x' } }, null]) {
+    assert.throws(() => coverage.check(summaryDir(total), 'coverage/coverage-summary.json', '80'), /total\.lines/, JSON.stringify(total));
+  }
+  const bad = summaryDir();
+  writeFileSync(path.join(bad, 'coverage', 'coverage-summary.json'), '{not json');
+  assert.throws(() => coverage.check(bad, 'coverage/coverage-summary.json', '80'), /not JSON/);
+  const linked = summaryDir(LINES(100, 100, 100));
+  symlinkSync(path.join(linked, 'coverage', 'coverage-summary.json'), path.join(linked, 'coverage', 'link.json'));
+  assert.throws(() => coverage.check(linked, 'coverage/link.json', '80'), /regular file/);
+  for (const rel of ['../coverage-summary.json', '/etc/passwd', './coverage/coverage-summary.json', '']) {
+    assert.throws(() => coverage.check(linked, rel, '80'), /normalized relative path/, rel);
+  }
+  for (const min of ['0', '101', '80.5', '', 'eighty', undefined]) {
+    assert.throws(() => coverage.check(linked, 'coverage/coverage-summary.json', min), /COVERAGE_MIN/, String(min));
+  }
 });
 
 // ---- embed.mjs ----------------------------------------------------------------------------------
