@@ -8,6 +8,14 @@ Personal reusable workflows for repository governance and delivery.
 candidate and a fast-forward-only promotion with a provenance tag. The authorizer decides; these actions only
 ask. Wiring, the caller workflow and the rulesets: [docs/PROMOTION.md](docs/PROMOTION.md).
 
+## CI pipeline
+
+`pipeline/pipeline.yml` is the reusable pipeline (`lint-test`, `quality`, `security`, `build`, `shadow`, `promote`) that
+every repository calls with `pipeline/caller.yml`. It is staged outside `.github/workflows/`, which is protected; the
+owner installs it. Install and inputs: [pipeline/README.md](pipeline/README.md).
+
+`actions/runner-telemetry` measures CPU, memory, disk and network on a Linux runner for the caretaker dashboard: [docs/TELEMETRY.md](docs/TELEMETRY.md).
+
 ## Central source releases
 
 `.github/workflows/request-release.yml` forwards the calling repository's exact main-push SHA, numeric repository ID, and source run ID to `susanbeasles/delivery_control`. It uses the caller's GitHub context, requires the personal owner's numeric ID, and rejects events other than main pushes. It performs no checkout or source code execution. The receiver independently verifies the source run and history before creating a release.
