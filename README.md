@@ -2,6 +2,12 @@
 
 Personal reusable workflows for repository governance and delivery.
 
+## Promotion actions
+
+`actions/request-shadow` and `actions/request-promotion` take a pull request to `main` through a shadow
+candidate and a fast-forward-only promotion with a provenance tag. The authorizer decides; these actions only
+ask. Wiring, the caller workflow and the rulesets: [docs/PROMOTION.md](docs/PROMOTION.md).
+
 ## Central source releases
 
 `.github/workflows/request-release.yml` forwards the calling repository's exact main-push SHA, numeric repository ID, and source run ID to `susanbeasles/delivery_control`. It uses the caller's GitHub context, requires the personal owner's numeric ID, and rejects events other than main pushes. It performs no checkout or source code execution. The receiver independently verifies the source run and history before creating a release.

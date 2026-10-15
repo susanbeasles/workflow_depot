@@ -1,0 +1,29 @@
+name: Request promotion
+description: >
+  From the pipeline run on a shadow/pr-<n> candidate, after every stage passed, ask the authorizer to
+  fast-forward main to this exact commit. The authorizer verifies checks and attestations; the promoter moves
+  main and tags provenance. If main moved meanwhile, a new candidate is built and this run ends as superseded.
+  The calling job needs `permissions: id-token: write` and nothing else.
+inputs:
+  artifact-digest:
+    description: sha256:<hex> of the attested build artifact, when the repository's policy requires an attestation.
+    required: false
+    default: ''
+outputs:
+  outcome:
+    description: promoted or stale_base
+    value: ${{ steps.request.outputs.outcome }}
+  main_sha:
+    description: The commit main now points at.
+    value: ${{ steps.request.outputs.main_sha }}
+  tag:
+    description: The provenance tag.
+    value: ${{ steps.request.outputs.tag }}
+runs:
+  using: composite
+  steps:
+    - id: request
+      shell: bash
+      env:
+        INPUT_ARTIFACT_DIGEST: ${{ inputs.artifact-digest }}
+      run: node "$GITHUB_ACTION_PATH/main.mjs"
