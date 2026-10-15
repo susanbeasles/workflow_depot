@@ -1,0 +1,15 @@
+name: Runner telemetry
+description: >
+  Samples CPU, memory, load, disk and network counters from /proc while the job runs and, at the end of the job,
+  writes a table to the step summary and one `##[runner-telemetry]{json}` line (schema runner-telemetry/v1,
+  numbers only) to the job log for the ghcaretaker collector. Use it as the first step of a job. Linux only;
+  elsewhere it prints a notice and emits nothing. It never fails the job and needs no permissions.
+inputs:
+  interval-seconds:
+    description: Seconds between samples, 1 to 60. Anything else falls back to 5 with a notice.
+    required: false
+    default: '5'
+runs:
+  using: node24
+  main: start.mjs
+  post: stop.mjs
