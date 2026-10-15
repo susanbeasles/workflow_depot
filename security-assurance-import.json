@@ -109,7 +109,7 @@
     },
     {
       "path": ".github/actions/ensure-results/action.yml",
-      "sha256": "33a30bbd9b3d20f470004e9122fea0474aa47899759ae127f3aebd7f0196f300",
+      "sha256": "da9a31f8f61b5e11f8bc3ce89dce6d2289fe696f365e2c4edfc262e9dcbe5432",
       "mode": 420
     },
     {
@@ -384,5 +384,13 @@
     }
   ],
   "validation_baseline": "Owner confirms comprehensive validation completed on creation; supplied qualification records preserved. Import tests do not rerun scanners.",
-  "adapter": "Root reusable workflow materializes unchanged module after each pinned depot checkout; module workflow files themselves remain unchanged."
+  "adapter": "Root reusable workflow materializes unchanged module after each pinned depot checkout; module workflow files themselves remain unchanged.",
+  "local_patches": [
+    {
+      "path": ".github/actions/ensure-results/action.yml",
+      "from_sha256": "33a30bbd9b3d20f470004e9122fea0474aa47899759ae127f3aebd7f0196f300",
+      "to_sha256": "da9a31f8f61b5e11f8bc3ce89dce6d2289fe696f365e2c4edfc262e9dcbe5432",
+      "reason": "Input description contained the expression ${{ job.status }}. GitHub evaluates expressions in action metadata and the job context is not available there, so every job using this action failed to load it (first live run, porchlight PR #9). Description changed to plain text; behavior unchanged."
+    }
+  ]
 }
