@@ -190,7 +190,7 @@ jobs:
       policy_revision: ${{ steps.bind.outputs.policy_revision }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { path: src, ref: "${{ github.sha }}", fetch-depth: 1, persist-credentials: false, submodules: false }
+        with: { path: src, ref: "${{ github.sha }}", fetch-depth: 0, persist-credentials: false, submodules: false }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { repository: "susanbeasles/workflow_depot", ref: "${{ needs.resolve-source.outputs.sha }}", path: .security-depot, persist-credentials: false }
       - name: Materialize intact security-assurance module
@@ -310,7 +310,7 @@ jobs:
         scan: [sast-semgrep, sast-ecosystem, sast-rust, sast-swift, sbom-and-sca, iac-scan, cache-policy, dast-zap, api-schemathesis, declare-unavailable]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { path: src, ref: "${{ github.sha }}", fetch-depth: 1, persist-credentials: false, submodules: false }
+        with: { path: src, ref: "${{ github.sha }}", fetch-depth: 0, persist-credentials: false, submodules: false }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { repository: "susanbeasles/workflow_depot", ref: "${{ needs.resolve-source.outputs.sha }}", path: .security-depot, persist-credentials: false }
       - name: Materialize intact security-assurance module
@@ -439,7 +439,7 @@ jobs:
         language: ${{ fromJSON(needs.detect.outputs.codeql_languages) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { path: src, ref: "${{ github.sha }}", fetch-depth: 1, persist-credentials: false, submodules: false }
+        with: { path: src, ref: "${{ github.sha }}", fetch-depth: 0, persist-credentials: false, submodules: false }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { repository: "susanbeasles/workflow_depot", ref: "${{ needs.resolve-source.outputs.sha }}", path: .security-depot, persist-credentials: false }
       - name: Materialize intact security-assurance module
@@ -471,7 +471,7 @@ jobs:
         language: ${{ fromJSON(needs.detect.outputs.codeql_languages) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { path: src, ref: "${{ github.sha }}", fetch-depth: 1, persist-credentials: false, submodules: false }
+        with: { path: src, ref: "${{ github.sha }}", fetch-depth: 0, persist-credentials: false, submodules: false }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { repository: "susanbeasles/workflow_depot", ref: "${{ needs.resolve-source.outputs.sha }}", path: .security-depot, persist-credentials: false }
       - name: Materialize intact security-assurance module

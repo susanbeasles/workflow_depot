@@ -146,7 +146,7 @@
     {
       "path": ".github/workflows/security-assurance.yml",
       "original_sha256": "3999a06eb8a8114b213889641496a5fecc237038e0d1267c0fa754a48f980b41",
-      "sha256": "27da442377c393d7ce8572e1b1ae9d1523328a9422a8319abe59769494ee9d81"
+      "sha256": "feccb56f8e0798dbb092011aef0101d4fe0cbf98fa03b45fe852f5dd3f2aab87"
     },
     {
       "path": "README.md",

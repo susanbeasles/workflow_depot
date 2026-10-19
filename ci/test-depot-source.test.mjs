@@ -81,3 +81,13 @@ test('nested main dispatch delegates OIDC only for callee source resolution',()=
  const leaf=readFileSync(new URL('../.github/workflows/request-deployment.yml',import.meta.url),'utf8').split('  dispatch:\n')[1];
  assert.match(leaf,/permissions: \{contents: read\}/);assert.doesNotMatch(leaf,/id-token: write/);
 });
+
+test('OIDC runtime trust matches documented GitHub domain boundary, not lookalike hosts',async()=>{
+ for(const host of ['attacker.actions.githubusercontent.com.evil.invalid','evilactions.githubusercontent.com','actions.githubusercontent.com']) {
+  const f=fixture({}, {ACTIONS_ID_TOKEN_REQUEST_URL:`https://${host}/token`});let calls=0;
+  await assert.rejects(resolveSource(f.env,async()=>{calls++;throw Error('network forbidden');},NOW));assert.equal(calls,0);
+ }
+ for(const host of ['pipelines.actions.githubusercontent.com','regional-runtime.actions.githubusercontent.com']) {
+  const f=fixture({}, {ACTIONS_ID_TOKEN_REQUEST_URL:`https://${host}/token`});assert.equal(await resolveSource(f.env,f.fetcher,NOW),SHA);
+ }
+});

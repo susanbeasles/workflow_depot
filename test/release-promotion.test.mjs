@@ -96,3 +96,9 @@ test('OIDC token is requested from the Actions runtime with the configured audie
 test('untrusted destination or audience fails before any token request or bearer transmission',async()=>{const target=record('https://admission.example.invalid/');for(const change of [{url:'https://attacker.invalid/'},{audience:'attacker'},{repository:'other/repo'},{environment:'production'}]){let calls=0;await assert.rejects(rawOidc({env:{},target:{...target,...change},audience:change.audience||audience,enrollments:[target],fetch:()=>{calls++;}}),/trusted exact/);assert.equal(calls,0);}await assert.rejects(rawSubmit({url:target.url,audience,request:request(),token:TOKEN,fetch:()=>assert.fail()}),/trusted exact/);});
 
 test('OIDC runtime host cannot redirect its bootstrap credential to arbitrary HTTPS',async()=>{let calls=0;await assert.rejects(requestOidcToken({env:{ACTIONS_ID_TOKEN_REQUEST_URL:'https://attacker.invalid/token',ACTIONS_ID_TOKEN_REQUEST_TOKEN:'synthetic'},audience,fetch:()=>{calls++;}}),/Untrusted Actions/);assert.equal(calls,0);});
+
+test('OIDC bootstrap rejects lookalike domains before sending a bearer credential',async()=>{
+ for(const host of ['attacker.actions.githubusercontent.com.evil.invalid','evilactions.githubusercontent.com','actions.githubusercontent.com']) {
+  let calls=0;await assert.rejects(requestOidcToken({env:{ACTIONS_ID_TOKEN_REQUEST_URL:`https://${host}/token`,ACTIONS_ID_TOKEN_REQUEST_TOKEN:'synthetic-fixture'},audience,fetch:()=>{calls++;}}),/Untrusted Actions/);assert.equal(calls,0);
+ }
+});

@@ -227,7 +227,10 @@ test('check names the pipeline implies equal the names the authorizer policy req
   const checkRequired = (where, got, job) => {
     for (const check of got) assert.ok(implied.has(check), `${where}: ${check} is not a pipeline check`);
     assert.ok(!got.includes(name(job)), `${where} requires its own job`);
-    assert.deepEqual([...got].sort(), [...transitive(job)].map(name).sort(), where);
+    // ADR-0002 exposes four authorizer checks. build-candidate is a private
+    // prerequisite of build, whose unconditional dependency is asserted below.
+    // Do not require a live-policy change merely for this isolation helper.
+    assert.deepEqual([...got].sort(), [...transitive(job)].filter(dep => dep !== 'build-candidate').map(name).sort(), where);
   };
   if (policy.required_jobs !== undefined) {
     // authorizer-policy with one job contract: pipeline_workflow + required_jobs.
@@ -247,5 +250,15 @@ test('check names the pipeline implies equal the names the authorizer policy req
     const rules = (policy.actions?.[action] ?? []).filter((rule) => rule.workflow === 'pipeline');
     assert.ok(rules.length > 0, `policy has no ${action} rule for the pipeline`);
     for (const rule of rules) checkRequired(`${action} ${rule.repo} ${fields[action]}`, rule[fields[action]] ?? [], job);
+  }
+});
+
+
+test('internal candidate cannot bypass the four public promotion checks',()=>{
+  assert.deepEqual(needsOf('build'),['build-candidate']);
+  assert.deepEqual([...needsOf('build-candidate')].sort(),['lint-test','quality','security']);
+  for(const job of ['build-candidate','build']) {
+    assert.equal(wf.jobs[job].if,undefined,'default success dependency gating is mandatory');
+    assert.equal(wf.jobs[job]['continue-on-error'],undefined,'failed candidate/build may not be green');
   }
 });
