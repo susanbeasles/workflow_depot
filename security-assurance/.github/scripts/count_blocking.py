@@ -7,7 +7,7 @@ acceptance_annotations. Original items and their severities never move or change
 confirmed High/Critical findings retain their blocking count. Legacy suppressed
 accepted items fail closed and require re-normalization from original evidence.
 """
-import datetime, hashlib, json, os, subprocess, sys
+import datetime, hashlib, json, os, re, subprocess, sys
 
 ACCEPTED_FILE = ".security/accepted-findings.yml"
 
@@ -16,7 +16,14 @@ def load_accepted(repo, ref):
     """Entries from the default branch; [] when the ref or file does not exist."""
     r = subprocess.run(["git", "-C", repo, "show", f"{ref}:{ACCEPTED_FILE}"], capture_output=True)
     if r.returncode != 0:
-        return []
+        # PR checkouts are shallow and lack origin/<default>; fetch just that ref. If it still cannot be
+        # read, nothing is accepted and every finding keeps blocking (fail closed).
+        branch = ref.removeprefix("refs/remotes/origin/")
+        subprocess.run(["git", "-C", repo, "fetch", "--quiet", "--no-tags", "--depth=1", "origin",
+                        f"+refs/heads/{branch}:{ref}"], capture_output=True, timeout=120)
+        r = subprocess.run(["git", "-C", repo, "show", f"{ref}:{ACCEPTED_FILE}"], capture_output=True)
+        if r.returncode != 0:
+            return []
     import yaml
     doc = yaml.safe_load(r.stdout.decode("utf-8"))
     if not isinstance(doc, dict) or doc.get("version") != 1 or not isinstance(doc.get("accepted"), list):
@@ -27,7 +34,9 @@ def load_accepted(repo, ref):
         if not isinstance(e, dict) or set(e) != {"rule", "path", "sha256", "reason", "expires"}:
             raise ValueError(f"accepted-findings: entry needs exactly rule, path, sha256, reason, expires: {e!r}")
         exp = e["expires"] if isinstance(e["expires"], datetime.date) else datetime.date.fromisoformat(str(e["expires"]))
-        if not str(e["reason"]).strip() or len(str(e["sha256"])) != 64 or exp > today + datetime.timedelta(days=366):
+        if not isinstance(e["reason"], str) or not e["reason"].strip() or not isinstance(e["sha256"], str) \
+                or not re.fullmatch(r"[0-9a-f]{64}", e["sha256"]) or not isinstance(e["rule"], str) \
+                or not isinstance(e["path"], str) or exp > today + datetime.timedelta(days=366):
             raise ValueError(f"accepted-findings: bad reason, sha256 or expiry (max 366 days): {e!r}")
         if exp >= today:
             out.append(e)

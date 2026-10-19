@@ -23,7 +23,8 @@ test("live workflows and actions use only owner or GitHub actions, SHA-pinned", 
   for (const file of files) {
     for (const [i, line] of readFileSync(file, "utf8").split("\n").entries()) {
       const m = /^\s*-?\s*uses:\s*["']?([^"'\s#]+)/.exec(line);
-      if (!m || m[1].startsWith("./") || m[1].startsWith("docker://")) continue;
+      if (!m || m[1].startsWith("./")) continue;
+      if (m[1].startsWith("docker://")) { bad.push(`${path.relative(root, file)}:${i + 1} ${m[1]} (container actions are not allowed)`); continue; }
       const ref = m[1];
       const owner = ref.split("/")[0];
       const pinned = /@[0-9a-f]{40}$/.test(ref);

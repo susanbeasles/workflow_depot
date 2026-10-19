@@ -149,7 +149,7 @@ from `release.zip`. The cosign flags above follow cosign v3; confirm them on the
 | `write-release-manifest` | `release.meta.json` with `builder.workflow = <depot>/.github/workflows/release.yml@<depot_ref>`. |
 | `verify-release` | Independent re-check of every digest, ZIP hygiene and cross-document consistency. Runs before signing and again before each publication. |
 | `attest-release` | cosign `sign-blob` + `verify-blob` over `release.zip` and `release.meta.json`; cosign v3.1.3 from the SHA-256 pinned tool registry. No GitHub artifact attestations. |
-| `publish-github-release` | Write-once Release: refuse existing release/tag, draft at the exact commit, upload ten assets (checking name, size and digest), recheck tag, publish, confirm tag target. |
+| `publish-github-release` | Write-once Release: refuse existing release/tag, draft at the exact commit, upload nine assets (checking name, size and digest), recheck tag, publish, confirm tag target. |
 | `publish-release-objects` | Optional R2 copy at `<bucket>/<application>/<tag>/`: SigV4 (`ci/release/sigv4.mjs`), `If-None-Match: *` on every PUT, `release.meta.json` last. |
 | `submit-promotion-request` | Deploy-stage helper (not wired into `release.yml`): builds `promotion-request/v1` (UUIDv7) and POSTs it once with a GitHub OIDC token; https only, redirects are errors, prints only status and requestId. Inputs: `manifest_path`, `admission_url`, `admission_audience`, `environment`, `release_bucket`, `expected_generation`, `github_deployment_id`; needs `id-token: write`. |
 

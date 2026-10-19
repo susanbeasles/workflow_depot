@@ -81,6 +81,8 @@ with tempfile.TemporaryDirectory() as work:
     accept([{**entry, "expires": far}]); assert run(work, repo, [hit])[0] == "ERR"
     accept([{**entry, "reason": " "}]); assert run(work, repo, [hit])[0] == "ERR"
     accept([{**entry, "severity": "low"}]); assert run(work, repo, [hit])[0] == "ERR"
+    accept([{**entry, "sha256": "Z" * 64}]); assert run(work, repo, [hit])[0] == "ERR"
+    accept([{**entry, "reason": None}]); assert run(work, repo, [hit])[0] == "ERR"
 
     # Without the env (non-admission jobs) annotations are unavailable and findings still block.
     accept([entry])

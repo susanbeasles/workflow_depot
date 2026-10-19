@@ -41,7 +41,7 @@ class Reconciliation(unittest.TestCase):
   staged=(ROOT/'pipeline/pipeline.yml').read_bytes();self.assertEqual(staged,(ROOT/'.github/workflows/pipeline.yml').read_bytes())
   pipeline=yaml.safe_load(staged);candidate=pipeline['jobs']['build-candidate'];authority=pipeline['jobs']['build']
   self.assertEqual(candidate['permissions'],{'contents':'read'})
-  self.assertEqual(authority['permissions'],{'contents':'read','id-token':'write','attestations':'write'})
+  self.assertEqual(authority['permissions'],{'contents':'read'})
   self.assertFalse(any('checkout@' in s.get('uses','') or 'setup-node@' in s.get('uses','') for s in authority['steps']))
-  self.assertTrue(any('attest-build-provenance@' in s.get('uses','') for s in authority['steps']))
+  self.assertFalse(any('attest' in s.get('uses','') for s in authority['steps']))  # no GitHub attestations
 if __name__=='__main__':unittest.main()

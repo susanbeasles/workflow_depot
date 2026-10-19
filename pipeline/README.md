@@ -37,7 +37,7 @@ After that PR merges, for each repository:
 | `quality` | `pipeline / quality` | every run | | `contents: read` | actionlint, zizmor, lockfile check, commit messages |
 | `security` | `pipeline / security` | every run | | `contents: read` | gitleaks (tree and commit range), `npm audit` |
 | `build-candidate` | `pipeline / build-candidate` | every run | the three above | `contents: read` | build, package, immutable artifact upload |
-| `build` | `pipeline / build` | every run | `build-candidate` | `contents: read`, `id-token: write`, `attestations: write` | download exact artifact ID, compute digest, provenance attestation |
+| `build` | `pipeline / build` | every run | `build-candidate` | `contents: read` | download exact artifact ID, compute digest (no GitHub attestation; releases are cosign-signed) |
 | `shadow` | `pipeline / shadow` | non-draft `pull_request` into `main` from this repository | `build` | `id-token: write` | `actions/request-shadow` |
 | `promote` | `pipeline / promote` | `push` to `shadow/pr-*` | `build` | `id-token: write` | `actions/request-promotion` with the artifact digest |
 
@@ -53,7 +53,6 @@ The first four run in parallel where they can. Callers need no configuration for
 | `test` | `npm test` | empty skips it, with a warning |
 | `build` | `npm run build --if-present` | |
 | `artifact-path` | empty: `npm pack` output | a file, or a directory packed as a deterministic `tar.gz` |
-| `require-attestation` | `true` | `false` only where GitHub attestations are unavailable |
 
 An empty command skips its step. Commands come from the caller's workflow file, never from PR content, and reach
 the shell only through `env:`.
@@ -69,7 +68,6 @@ the shell only through `env:`.
   | actions/checkout | `3d3c42e5aac5ba805825da76410c181273ba90b1` | v7.0.1 |
   | actions/setup-node | `820762786026740c76f36085b0efc47a31fe5020` | v7.0.0 |
   | actions/upload-artifact | `cf430e030ddbb5b0abf93d22962f4752f3646cd9` | v7.0.2 |
-  | actions/attest-build-provenance | `4d101475d8b20a2381f78447822ac1eab6504dd8` | v4.2.2 (wraps actions/attest `508db95d…` v4.2.1) |
 
 - Tools are pinned binaries, checked before use. **gitleaks 8.30.1**: the tarball sha256 from
   `security-assurance/policy/tool-registry.yml`, which cross-checked it against upstream checksums.

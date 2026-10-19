@@ -91,7 +91,7 @@
     {
       "path": ".github/scripts/count_blocking.py",
       "original_sha256": "8ffb8d705cbcf21263fe6fc8a9d05f2d9f53402cec379b517ebdfb85ec72be28",
-      "sha256": "7dcd256d297744dbaade3e9be5bcd1cc27d1c44f93a665d2b3141215b5d12ce8"
+      "sha256": "ef65d6572d8c98c8c4a14a21548a295ce331ea8f3e3851877187ff3f1499af3f"
     },
     {
       "path": ".github/scripts/detect_ecosystems.py",
