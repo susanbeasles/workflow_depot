@@ -43,6 +43,7 @@ export function createRotatingSourceFeaturePolicy({storage,producerPolicy,resolv
    return checked(request,await retained(request,accepted));
   },
   async consumeFeatureCommit({request:input,grantID}){
+   need(HASH.test(grantID));  // the issued grant ID is required, never optional
    const request=structuredClone(input),accepted=await context(request),record=await retained(request,accepted,grantID);await checked(request,record);
    await storage.transaction(async tx=>{const stored=await tx.get(recordKey(request));need(stored?.state==='issued'&&equal(stored,record));await tx.put(recordKey(request),{...stored,state:'consumption-attempted'});});
    // Persist before external effect. Lost response is uncertain and never automatically retried.
@@ -50,6 +51,6 @@ export function createRotatingSourceFeaturePolicy({storage,producerPolicy,resolv
    await storage.transaction(async tx=>{const stored=await tx.get(recordKey(request));need(stored?.state==='consumption-attempted'&&equal(stored.request,request)&&equal(stored.accepted,accepted));await tx.put(recordKey(request),{...stored,state:'consumed'});});
    return structuredClone(record.boundGrant);
   },
-  async checkFeatureCommit({request:input,grantID}){const request=structuredClone(input),accepted=await context(request),record=await retained(request,accepted,grantID);return checked(request,record);}
+  async checkFeatureCommit({request:input,grantID}){need(HASH.test(grantID));const request=structuredClone(input),accepted=await context(request),record=await retained(request,accepted,grantID);return checked(request,record);}
  });
 }
