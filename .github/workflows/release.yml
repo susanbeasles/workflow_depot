@@ -229,7 +229,8 @@ jobs:
           application_path: ${{ github.workspace }}/.release/state/application.json
           targets: ${{ needs.prepare.outputs.migrations_targets }}
           release_dir: ${{ github.workspace }}/.release/out
-      - uses: ./.depot/.github/actions/write-authorization-policy
+      - id: policy
+        uses: ./.depot/.github/actions/write-authorization-policy
         with:
           app_path: ${{ github.workspace }}/app
           application_path: ${{ github.workspace }}/.release/state/application.json
@@ -261,6 +262,7 @@ jobs:
           release_dir: ${{ github.workspace }}/.release/out
       - uses: ./.depot/.github/actions/write-release-manifest
         with:
+          created_at: ${{ steps.policy.outputs.created_at }}
           release_dir: ${{ github.workspace }}/.release/out
           application_path: ${{ github.workspace }}/.release/state/application.json
           context_path: ${{ github.workspace }}/.release/state/context.json

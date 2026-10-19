@@ -27,14 +27,16 @@ assert "actions/setup-python" not in live
 assert '/usr/bin/python3 -m venv --system-site-packages "$RUNNER_TEMP/pyenv"' in live
 print("s2 runtime regressions: ok")
 
-# A waived CodeQL language reports NOT_APPLICABLE by name; the others still run; Semgrep covers Swift.
-assert "codeql_waive_languages:" in live
-assert "--status NOT_APPLICABLE --reason \"waived by caller (codeql_waive_languages)" in live
-assert "if: ${{ !(matrix.language == 'swift' && contains(format(' {0} ', inputs.codeql_waive_languages), format(' {0} ', matrix.language))) }}\n        uses: ./.security-depot/.github/actions/sast-codeql" in live
+# Swift remains an explicit unqualified CodeQL control, never a caller waiver or PASS.
+assert "codeql_waive_languages:" not in live
+assert "waived by caller" not in live
+assert "POLICY_UNAVAILABLE" in (sa / ".github/actions/sast-codeql/action.yml").read_text()
+helper = (sa / ".github/scripts/codeql_isolated.py").read_text()
+assert "Swift CodeQL remains unqualified" in helper
 assert " p/swift " in (sa / ".github/actions/sast-semgrep/action.yml").read_text()
-print("codeql waiver: ok")
+print("strict CodeQL qualification: ok")
 
-# Exit 1 means "findings"; the policy fail_on severities decide, after accepted findings.
+# Exit 1 means "findings"; the policy fail_on severities decide, with annotation-only acceptance metadata.
 import yaml
 pol = {c["id"]: c for c in yaml.safe_load((sa / "policy/release-policy.yml").read_text())["controls"]}
 for rel, ctrl in [("sast-semgrep", "SAST-SEMGREP"), ("sast-ecosystem", "SAST-BANDIT"), ("sast-shellcheck", "SAST-SHELLCHECK")]:
@@ -51,5 +53,5 @@ assert 'echo "PIP_NO_CACHE_DIR=1" >> "$GITHUB_ENV"' in live
 print("pip cache isolation: ok")
 
 assert "security-events" not in live
-assert "upload: never" in (sa / ".github/actions/sast-codeql/action.yml").read_text()
+assert "github/codeql-action/upload-sarif@" not in (sa / ".github/actions/sast-codeql/action.yml").read_text()
 print("codeql local-only: ok")

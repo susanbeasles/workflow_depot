@@ -10,14 +10,47 @@ runs:
       id: yr
       with: { tool: yara-x }
     - shell: bash
+      if: always()
+      env:
+        CACHE_SPECS: ${{ inputs.specs }}
+        RULES_PATH: ${{ inputs.rules_path }}
       run: |
         set +e; T0=$SECONDS; S="${{ github.action_path }}/../../scripts"; st() { if [ "$1" = ERR ]; then echo TOOL_FAILURE; elif [ "$1" -gt 0 ]; then echo FAIL; else echo PASS; fi; }; E="$RESULTS_DIR/evidence"; mkdir -p "$E"
-        ALL="$E/cache-content.findings.json"; echo '{"items":[],"roots":[]}' > "$ALL"; TF=0
+        ALL="$E/cache-content.findings.json"; echo '{"items":[],"roots":[]}' > "$ALL"; TF=0; ROOTS=0
         while IFS= read -r spec; do [ -z "$spec" ] && continue
+          ROOTS=$((ROOTS+1))
           root="${spec%%:*}"; rest="${spec#*:}"; kind="${rest%%:*}"; lock=""; [ "$rest" != "$kind" ] && lock="${rest#*:}"
           root="${root/#\~/$HOME}"; tag=$(echo "$root" | tr '/~' '__')
           timeout 900 python3 "$S/cache_inspect.py" --root "$root" --kind "$kind" ${lock:+--lockfile "$lock"} --out "$E/cache-$tag.json"; RC=$?; [ $RC -ne 0 ] && TF=1
-          if [ -d "$root" ]; then timeout 600 yr scan --recursive --skip-larger=104857600 "${{ inputs.rules_path }}" "$root" > "$E/cache-$tag.yara.txt" 2>/dev/null; python3 "$S/normalize.py" --tool yarax --in "$E/cache-$tag.yara.txt" --out "$E/cache-$tag.yara.json" >/dev/null; fi
+          if [ -d "$root" ]; then
+            # Bound the scanner, but record every size omission as TOOL_FAILURE.
+            # Filesystem traversal errors likewise cannot certify complete coverage.
+            python3 - "$root" <<'PY_COVERAGE'
+        import os, stat, sys
+        incomplete = False
+        def failed(error):
+            global incomplete
+            incomplete = True
+        for directory, dirs, files in os.walk(sys.argv[1], onerror=failed):
+            for name in files:
+                try:
+                    info = os.lstat(os.path.join(directory, name))
+                    if stat.S_ISREG(info.st_mode) and info.st_size > 104857600:
+                        incomplete = True
+                except OSError:
+                    incomplete = True
+        sys.exit(1 if incomplete else 0)
+        PY_COVERAGE
+            [ $? -ne 0 ] && TF=1
+            timeout 600 yr scan --recursive --skip-larger=104857600 "$RULES_PATH" "$root" > "$E/cache-$tag.yara.txt" 2>"$E/cache-$tag.yara.err"; YRC=$?
+            [ "$YRC" -ne 0 ] && TF=1
+            [ -s "$E/cache-$tag.yara.err" ] && TF=1
+            grep -Eiq '^(warning|error|skipping|skipped|\[)' "$E/cache-$tag.yara.txt" && TF=1
+            python3 "$S/normalize.py" --tool yarax --in "$E/cache-$tag.yara.txt" --out "$E/cache-$tag.yara.json" >/dev/null; [ $? -ne 0 ] && TF=1
+            [ -f "$E/cache-$tag.yara.json" ] || TF=1
+          elif [ -e "$root" ] || [ -L "$root" ]; then
+            TF=1
+          fi
           python3 - "$ALL" "$E/cache-$tag.json" "$E/cache-$tag.yara.json" "$root" "$kind" <<'PY'
         import json,sys,os
         a=json.load(open(sys.argv[1]))
@@ -27,7 +60,9 @@ runs:
                 if d.get("parse_error"): a["parse_error"]=d["parse_error"]
         a["roots"].append({"root":sys.argv[4],"kind":sys.argv[5]}); json.dump(a,open(sys.argv[1],"w"),indent=2)
         PY
-        done <<< "${{ inputs.specs }}"
+          [ $? -ne 0 ] && TF=1
+        done <<< "$CACHE_SPECS"
+        [ "$ROOTS" -eq 0 ] && TF=1
         N=$(python3 "$S/count_blocking.py" "$ALL"); [ $TF -ne 0 ] && N=ERR
         python3 "$S/result.py" --control CACHE-CONTENT --domain I --status $(st "$N") --reason "$N critical/high across $(python3 -c "import json;print(len(json.load(open('$ALL'))['roots']))") roots" \
           --tool cache-inspect --tool-version 1 --ruleset "yara-x ${{ steps.yr.outputs.version }}" --findings-json "$ALL" --evidence "$ALL" --duration-s $((SECONDS-T0)) \

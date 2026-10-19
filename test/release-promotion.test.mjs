@@ -2,10 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {uuidv7,validateHttpsUrl,buildPromotionRequest,requestOidcToken,submitPromotion} from '../ci/release/submit-promotion-request.mjs';
+import {uuidv7,validateHttpsUrl,buildPromotionRequest,requestOidcToken as rawOidc,submitPromotion as rawSubmit} from '../ci/release/submit-promotion-request.mjs';
 import {validatePromotionRequest,UUID_V7} from '../src/shared/release-contract.mjs';
 import {makeApp,buildRelease} from './release-fixtures.mjs';
 
+const audience='admission.example.invalid';
+const record=url=>({url,audience,repository:'example-owner/demo-app',application:'demoapp',environment:'staging'});
+const submitPromotion=options=>rawSubmit({...options,audience,enrollments:[record(options.url)]});
+const requestOidcToken=options=>rawOidc({...options,target:record('https://admission.example.invalid/'),enrollments:[{...record('https://admission.example.invalid/'),audience:options.audience}]});
 const TOKEN='aaaaaaaa.bbbbbbbb.cccccccc';
 function recorder(responses){
  const calls=[];
@@ -72,7 +76,7 @@ test('submission does not retry and reports failures, timeouts and redirects',as
 });
 
 test('OIDC token is requested from the Actions runtime with the configured audience',async()=>{
- const env={ACTIONS_ID_TOKEN_REQUEST_URL:'https://runtime.example.invalid/idtoken?api-version=2.0',ACTIONS_ID_TOKEN_REQUEST_TOKEN:'request-request-request'};
+ const env={ACTIONS_ID_TOKEN_REQUEST_URL:'https://fixture.actions.githubusercontent.com/idtoken?api-version=2.0',ACTIONS_ID_TOKEN_REQUEST_TOKEN:'request-request-request'};
  const ok=recorder([new Response(JSON.stringify({value:TOKEN}),{status:200})]);
  assert.equal(await requestOidcToken({env,audience:'admission.example.invalid',fetch:ok.fetch}),TOKEN);
  const url=new URL(ok.calls[0].url);
@@ -88,3 +92,7 @@ test('OIDC token is requested from the Actions runtime with the configured audie
  const denied=recorder([new Response('no',{status:403})]);
  await assert.rejects(()=>requestOidcToken({env,audience:'a',fetch:denied.fetch}),/HTTP 403/);
 });
+
+test('untrusted destination or audience fails before any token request or bearer transmission',async()=>{const target=record('https://admission.example.invalid/');for(const change of [{url:'https://attacker.invalid/'},{audience:'attacker'},{repository:'other/repo'},{environment:'production'}]){let calls=0;await assert.rejects(rawOidc({env:{},target:{...target,...change},audience:change.audience||audience,enrollments:[target],fetch:()=>{calls++;}}),/trusted exact/);assert.equal(calls,0);}await assert.rejects(rawSubmit({url:target.url,audience,request:request(),token:TOKEN,fetch:()=>assert.fail()}),/trusted exact/);});
+
+test('OIDC runtime host cannot redirect its bootstrap credential to arbitrary HTTPS',async()=>{let calls=0;await assert.rejects(requestOidcToken({env:{ACTIONS_ID_TOKEN_REQUEST_URL:'https://attacker.invalid/token',ACTIONS_ID_TOKEN_REQUEST_TOKEN:'synthetic'},audience,fetch:()=>{calls++;}}),/Untrusted Actions/);assert.equal(calls,0);});

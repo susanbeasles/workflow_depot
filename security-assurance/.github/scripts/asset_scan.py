@@ -264,6 +264,8 @@ def scan_zip(path, data, F):
         F.add("medium", "ZIP-MALFORMED", path, str(e))
         return
     total = 0
+    if len(zf.infolist()) > 5000:
+        F.add("high", "ZIP-ENTRY-LIMIT", path, "archive exceeds 5000 members; coverage incomplete")
     for info in zf.infolist()[:5000]:
         n = info.filename
         if n.startswith("/") or ".." in n.split("/") or re.match(r"[a-zA-Z]:\\", n):
@@ -276,6 +278,7 @@ def scan_zip(path, data, F):
         try:
             head = zf.open(info).read(8)
         except Exception:
+            F.add("high", "ZIP-MEMBER-UNREADABLE", path, f"cannot inspect archive member {n}")
             continue
         if any(head.startswith(mg) for mg in EXEC_MAGIC):
             F.add("high", "ZIP-EMBEDDED-EXECUTABLE", path, f"executable member {n}")
@@ -291,8 +294,7 @@ def scan_file(path, rel, F, max_bytes):
     with open(path, "rb") as f:
         data = f.read(max_bytes + 1)
     if len(data) > max_bytes:
-        if ext in SVG_EXT | XML_EXT:
-            F.add("high", "ASSET-OVERSIZE", rel, f"> {max_bytes} bytes; refused to parse")
+        F.add("high", "ASSET-OVERSIZE", rel, f"> {max_bytes} bytes; coverage incomplete")
         return
     # magic vs extension
     if ext in EXT_MAGIC and not any(data.startswith(m) for m in EXT_MAGIC[ext]):
@@ -308,11 +310,13 @@ def scan_file(path, rel, F, max_bytes):
             scan_svg_or_xml(rel, data, F, True)
     if ext in SVG_EXT:
         if ext == ".svgz":
-            import gzip
+            import gzip, io
             try:
-                data = gzip.decompress(data[:max_bytes])
+                # Limit output during inflation, including concatenated gzip members.
+                with gzip.GzipFile(fileobj=io.BytesIO(data), mode="rb") as compressed:
+                    data = compressed.read(max_bytes * 4 + 1)
             except Exception:
-                F.add("medium", "SVGZ-MALFORMED", rel, "cannot decompress")
+                F.add("high", "SVGZ-MALFORMED", rel, "cannot decompress")
                 return
             if len(data) > max_bytes * 4:
                 F.add("high", "SVGZ-DECOMPRESSION-RATIO", rel, "decompresses far beyond limit")
@@ -341,6 +345,7 @@ def main():
     a = ap.parse_args()
     F = Findings()
     scanned = 0
+    limit_reached = False
     for dirpath, dirnames, filenames in os.walk(a.root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         for fn in filenames:
@@ -350,14 +355,17 @@ def main():
             rel = os.path.relpath(p, a.root)
             ext = os.path.splitext(fn)[1].lower()
             if ext in SVG_EXT | XML_EXT | IMG_EXT | FONT_EXT | ARCH_EXT | {".pdf", ".wasm", ".gz", ".tgz"} or ext == "":
+                if scanned >= a.max_files:
+                    F.add("high", "ASSET-FILE-LIMIT", rel, f"exceeds {a.max_files} files; coverage incomplete")
+                    limit_reached = True
+                    break
                 try:
                     scan_file(p, rel, F, a.max_bytes)
                 except Exception as e:
-                    F.add("medium", "ASSET-SCAN-ERROR", rel, f"scanner exception: {e}")
+                    F.add("high", "ASSET-SCAN-ERROR", rel, f"scanner exception: {e}")
                 scanned += 1
-                if scanned >= a.max_files:
-                    F.add("medium", "ASSET-FILE-LIMIT", ".", f"stopped after {a.max_files} files")
-                    break
+        if limit_reached:
+            break
     limitations = ["WOFF/WOFF2 table structure not decompressed (brotli not available offline).",
                    "Decoder-vulnerability intelligence (CVE lookups for libpng/libjpeg) is covered by SCA on the consuming app, not here.",
                    "Sandboxed rendering is not performed; this is structural analysis only."]

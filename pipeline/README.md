@@ -36,7 +36,8 @@ After that PR merges, for each repository:
 | `lint-test` | `pipeline / lint-test` | every run | | `contents: read` | install, lint, typecheck, test |
 | `quality` | `pipeline / quality` | every run | | `contents: read` | actionlint, zizmor, lockfile check, commit messages |
 | `security` | `pipeline / security` | every run | | `contents: read` | gitleaks (tree and commit range), `npm audit` |
-| `build` | `pipeline / build` | every run | the three above | `contents: read` | build, package, `sha256`, upload |
+| `build-candidate` | `pipeline / build-candidate` | every run | the three above | `contents: read` | build, package, immutable artifact upload |
+| `build` | `pipeline / build` | every run | `build-candidate` | `contents: read`, `id-token: write`, `attestations: write` | download exact artifact ID, compute digest, provenance attestation |
 | `shadow` | `pipeline / shadow` | non-draft `pull_request` into `main` from this repository | `build` | `id-token: write` | `actions/request-shadow` |
 | `promote` | `pipeline / promote` | `push` to `shadow/pr-*` | `build` | `id-token: write` | `actions/request-promotion` with the artifact digest |
 
@@ -52,6 +53,7 @@ The first four run in parallel where they can. Callers need no configuration for
 | `test` | `npm test` | empty skips it, with a warning |
 | `build` | `npm run build --if-present` | |
 | `artifact-path` | empty: `npm pack` output | a file, or a directory packed as a deterministic `tar.gz` |
+| `require-attestation` | `true` | `false` only where GitHub attestations are unavailable |
 
 An empty command skips its step. Commands come from the caller's workflow file, never from PR content, and reach
 the shell only through `env:`.
@@ -67,6 +69,7 @@ the shell only through `env:`.
   | actions/checkout | `3d3c42e5aac5ba805825da76410c181273ba90b1` | v7.0.1 |
   | actions/setup-node | `820762786026740c76f36085b0efc47a31fe5020` | v7.0.0 |
   | actions/upload-artifact | `cf430e030ddbb5b0abf93d22962f4752f3646cd9` | v7.0.2 |
+  | actions/attest-build-provenance | `4d101475d8b20a2381f78447822ac1eab6504dd8` | v4.2.2 (wraps actions/attest `508db95d…` v4.2.1) |
 
 - Tools are pinned binaries, checked before use. **gitleaks 8.30.1**: the tarball sha256 from
   `security-assurance/policy/tool-registry.yml`, which cross-checked it against upstream checksums.
@@ -96,12 +99,13 @@ the shell only through `env:`.
   work in progress. Marking the PR ready (`ready_for_review` in the caller) starts the run that does ask. Fork
   PRs skip `shadow`: they get no OIDC token, and the authorizer refuses them (`is_fork`).
 
-### No GitHub attestations
+### Signing isolation
 
-GitHub artifact attestations are not available on this account and are not used. `build` holds only
-`contents: read`: it builds, packages, records `artifact_digest` (`sha256:<hex>`) and uploads the artifact, and
-no build tooling can mint an OIDC token. `promote` passes that digest to the authorizer, which binds it to the
-candidate commit and run.
+Candidate install/build/package code runs in `build-candidate` without OIDC or attestation permissions.
+The existing required `pipeline / build` check runs on a fresh runner, downloads the immutable artifact
+ID from the same workflow run, validates one regular file, recomputes its digest and attests those bytes.
+It does not check out candidate code or run package tooling. Shadow/promotion still depend on `build`;
+no authorizer check names change. This adds a job to the original ADR-0002 job table to separate signing authority.
 
 ## Embedded scripts
 

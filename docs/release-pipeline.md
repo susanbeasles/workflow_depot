@@ -196,3 +196,8 @@ from `release.zip`. The cosign flags above follow cosign v3; confirm them on the
 - The SBOM covers the release payload; bundled JavaScript without package manifests yields sparse
   component lists (syft's documented blind spot).
 - GitHub artifact attestations are not used (not available on this account); signing is cosign only.
+
+
+## Strict findings and Swift qualification
+
+Finding rationale is annotation-only: High/Critical findings remain in the blocking set. See [finding rationale annotations](accepted-findings.md). Caller-controlled Swift CodeQL waivers are unsupported. Swift remains an expected coverage control and reports POLICY_UNAVAILABLE until the permitted runner boundary is qualified; Semgrep coverage does not turn unqualified CodeQL into PASS.

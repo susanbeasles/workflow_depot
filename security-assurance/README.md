@@ -18,6 +18,8 @@ Every control writes one JSON result through `.github/scripts/result.py`. The ga
 
 ## Adopting it in an application repo
 
+This distribution is bound to the central `susanbeasles/workflow_depot` reusable workflow. Its resolver accepts only that repository and requires `depot_ref` to equal the executing reusable workflow's immutable revision. Each job copies the checked-out `security-assurance/` module into `.security-depot/` before loading its actions or scripts. Application callers must grant OIDC permission for source resolution and use the same reviewed full commit SHA for the reusable workflow and `depot_ref`. Copying the workflow into another repository does not establish a trusted identity and fails closed; the original fork-based examples below require a separately reviewed trust-policy migration before use.
+
 1. Fork/copy this repo into your org, protect `main`, require the `Scanner qualification` workflow.
 2. Copy `.github/workflows/caller-example.yml` into the app repo as `.github/workflows/security.yml`; replace `YOUR-ORG` and `PINNED_DEPOT_SHA` (full 40-char SHA, both places).
 3. Enable GitHub Advanced Security on private repos, or expect `SAST-CODEQL` to block (it is deliberately not downgradable from a caller input).

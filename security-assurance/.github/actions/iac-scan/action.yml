@@ -20,7 +20,8 @@ runs:
         set +e; S="${{ github.action_path }}/../../scripts"; st() { if [ "$1" = ERR ]; then echo TOOL_FAILURE; elif [ "$1" -gt 0 ]; then echo FAIL; else echo PASS; fi; }; E="$RESULTS_DIR/evidence"; mkdir -p "$E"; SRC="${{ inputs.source_path }}"; R="${{ github.action_path }}/../../../policy/tool-registry.yml"
         # Checkov
         T0=$SECONDS; CV=$(python3 -c "import yaml;print(yaml.safe_load(open('$R'))['python_tools']['checkov'])")
-        pip install --disable-pip-version-check -q "checkov==$CV" >"$E/checkov-install.log" 2>&1 || { python3 "$S/result.py" --control IAC-CHECKOV --domain K --status TOOL_FAILURE --reason "pip install checkov==$CV failed" --tool checkov; exit 0; }
+        PYTOOLS=$(python3 "$S/python_tool_install.py" --registry "$R" --tools checkov) 2>"$E/checkov-install.log" || { python3 "$S/result.py" --control IAC-CHECKOV --domain K --status TOOL_FAILURE --reason "hash-locked Python wheel provisioning unavailable or invalid" --tool checkov; exit 0; }
+        export PATH="$PYTOOLS:$PATH"
         timeout 900 checkov -d "$SRC" --quiet --compact -o json --output-file-path "$E/checkov" --skip-path node_modules --skip-path .git --skip-download >"$E/checkov.log" 2>&1; RC=$?
         f=$(ls "$E"/checkov/results_json.json 2>/dev/null | head -1); [ -n "$f" ] && cp "$f" "$E/checkov.json"
         python3 "$S/normalize.py" --tool checkov --in "$E/checkov.json" --out "$E/checkov.findings.json"; NF="$E/checkov.findings.json"

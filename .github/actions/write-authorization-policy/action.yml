@@ -2,10 +2,10 @@ name: Write authorization policy
 description: >-
   Writes authorization-policy.json (authorization-policy/v1) binding the application,
   release tag, source commit and the SHA-pinned release workflow signer. The expiry is
-  derived from the source commit time so the release stays reproducible.
+  derived from the trusted runner clock; source commit timestamps grant no validity.
 inputs:
   app_path:
-    description: Application checkout (used only to read the commit timestamp)
+    description: Legacy application checkout input; never read for authorization time
     required: true
   application_path:
     description: Validated application manifest
@@ -22,10 +22,15 @@ inputs:
   release_dir:
     description: Release output directory
     required: true
+outputs:
+  created_at:
+    description: Trusted runner release instant shared with the signed manifest
+    value: ${{ steps.policy.outputs.created_at }}
 runs:
   using: composite
   steps:
-    - shell: bash
+    - id: policy
+      shell: bash
       env:
         SCRIPTS: ${{ github.action_path }}/../../../ci/release
         APP_PATH: ${{ inputs.app_path }}
@@ -36,7 +41,5 @@ runs:
         RELEASE_DIR: ${{ inputs.release_dir }}
       run: |
         set -euo pipefail
-        epoch="$(git -C "$APP_PATH" log -1 --format=%ct "$GITHUB_SHA")"
-        [[ "$epoch" =~ ^[1-9][0-9]{0,11}$ ]] || { echo "::error::could not read the source commit time"; exit 1; }
         node "$SCRIPTS/write-authorization-policy.mjs" --application "$APPLICATION_PATH" --context "$CONTEXT_PATH" \
-          --depot-repository "$DEPOT_REPOSITORY" --depot-sha "$DEPOT_SHA" --source-date-epoch "$epoch" --out-dir "$RELEASE_DIR"
+          --depot-repository "$DEPOT_REPOSITORY" --depot-sha "$DEPOT_SHA" --github-output "$GITHUB_OUTPUT" --out-dir "$RELEASE_DIR"

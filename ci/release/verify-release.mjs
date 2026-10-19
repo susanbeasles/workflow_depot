@@ -130,7 +130,7 @@ export async function verifyRelease(releaseDir,{stage='unsigned',layout='build',
  check(bundlePaths.length===manifest.targets.length&&manifest.targets.every(t=>bundlePaths.includes(t.artifactPath)),'checksums.json bundles do not match release.meta.json targets');
  for(const t of manifest.targets)check(t.sha256===checksums.files[t.artifactPath].sha256&&t.sizeBytes===checksums.files[t.artifactPath].sizeBytes,`release.meta.json digest mismatch for ${t.artifactPath}`);
 
- const policy=strictDocument(policyBytes,validateAuthorizationPolicy,'authorization-policy.json');
+ const policy=strictDocument(policyBytes,value=>validateAuthorizationPolicy(value,{createdAt:manifest.createdAt}),'authorization-policy.json');
  for(const key of ['application','repository','repositoryId','sourceCommit','releaseTag'])check(policy[key]===manifest[key],`authorization policy ${key} does not match release.meta.json`);
  check(policy.signer.identity===signerIdentity(manifest.builder.workflow),'authorization policy signer does not match the release builder workflow');
  const contractOf=t=>canonical(t.adapter===ADAPTERS.worker?{adapter:t.adapter,healthContract:t.healthContract}:{adapter:t.adapter,recoveryPolicy:t.recoveryPolicy});

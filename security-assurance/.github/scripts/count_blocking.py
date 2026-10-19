@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 """Print the number of findings at the given severities, or ERR if the findings file is missing/malformed/has a parse_error.
 
-Accepted findings: when ACCEPTED_REPO (the scanned git checkout) and ACCEPTED_REF (the
-repository's default branch, e.g. refs/remotes/origin/main) are set, entries in
-.security/accepted-findings.yml AS COMMITTED ON THAT REF are applied. The commit under test
-cannot add its own exceptions. An entry matches one finding only on rule + path + the SHA-256
-of that file's bytes in the scanned checkout, so any edit to the file re-blocks. Entries
-need a reason and an unexpired date (at most 366 days ahead). Matches move from "items" to
-"accepted" (with the reason) in the findings file, so result.py and the gate never count them
-and the evidence still shows them. A malformed list fails closed (ERR).
+Acceptance rationale is read from an exact default-branch entry when optional
+ACCEPTED_REPO/ACCEPTED_REF metadata is installed. Matches are recorded separately in
+acceptance_annotations. Original items and their severities never move or change;
+confirmed High/Critical findings retain their blocking count. Legacy suppressed
+accepted items fail closed and require re-normalization from original evidence.
 """
 import datetime, hashlib, json, os, subprocess, sys
 
@@ -55,23 +52,23 @@ def file_sha256(repo, rel):
 
 
 def apply_accepted(findings_path, d):
+    """Compatibility name: attach rationale only; never accept away a finding."""
+    if d.get("accepted"):
+        raise ValueError("legacy suppressed findings require original-evidence re-normalization")
     repo, ref = os.environ.get("ACCEPTED_REPO", ""), os.environ.get("ACCEPTED_REF", "")
-    if not repo or not ref.startswith("refs/remotes/origin/") or ref == "refs/remotes/origin/":
-        return
-    entries = load_accepted(repo, ref)
-    if not entries:
-        return
-    keep, accepted = [], list(d.get("accepted", []))
-    for item in d["items"]:
-        rel = rel_path(item.get("path", ""), repo)
-        digest = file_sha256(repo, rel)
-        hit = next((e for e in entries if e["rule"] == item.get("rule") and e["path"] == rel and digest == e["sha256"]), None)
-        if hit:
-            accepted.append({**item, "accepted_reason": hit["reason"], "accepted_until": str(hit["expires"])})
-        else:
-            keep.append(item)
-    if len(keep) != len(d["items"]):
-        d["items"], d["accepted"] = keep, accepted
+    annotations = []
+    if repo and ref.startswith("refs/remotes/origin/") and ref != "refs/remotes/origin/":
+        entries = load_accepted(repo, ref)
+        for index, item in enumerate(d["items"]):
+            rel = rel_path(item.get("path", ""), repo)
+            digest = file_sha256(repo, rel)
+            hit = next((e for e in entries if e["rule"] == item.get("rule") and e["path"] == rel and digest == e["sha256"]), None)
+            if hit:
+                annotations.append({"kind": "rationale-only", "item_index": index,
+                                    "rule": item.get("rule"), "path": rel, "sha256": digest,
+                                    "reason": hit["reason"], "expires": str(hit["expires"])})
+    if annotations or "acceptance_annotations" in d:
+        d["acceptance_annotations"] = annotations
         with open(findings_path, "w") as f:
             json.dump(d, f, indent=2)
 

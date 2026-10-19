@@ -336,6 +336,8 @@ def main():
         dns[:] = [d for d in dns if d not in (".git", "node_modules", "target", ".build", ".venv", "venv")]
         if any(m in fns for m in ("package.json", "Cargo.toml", "Package.swift", "setup.py", "pyproject.toml")) or any(re.match(r"requirements.*\.txt$", f) for f in fns):
             roots.add(dp)
+    if len(roots) > 200:
+        F_.add("high", "SUPPLY-CHAIN-ROOT-LIMIT", ".", f"{len(roots)} ecosystem roots exceed limit 200; coverage incomplete")
     for root in sorted(roots)[:200]:
         rel = os.path.relpath(root, a.repo)
         before = len(F_.items)
@@ -343,7 +345,7 @@ def main():
             try:
                 fn(root, a.base_ref if root == a.repo else "", F_)
             except Exception as e:
-                F_.add("medium", "SUPPLY-CHAIN-ERROR", fn.__name__, f"{type(e).__name__}: {str(e)[:150]}")
+                F_.add("high", "SUPPLY-CHAIN-ERROR", fn.__name__, f"{type(e).__name__}: {str(e)[:150]}")
         if rel != ".":
             for it in F_.items[before:]:
                 it["path"] = f"{rel}/{it['path']}"

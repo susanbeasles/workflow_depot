@@ -1,0 +1,320 @@
+{
+  "baseline_commit": "f80cee4f3b763538944942beda92b0b6a542eacd",
+  "baseline_manifest": "security-assurance-import.json",
+  "reason": "Explicit security remediation; original imported archive manifest retained as provenance.",
+  "files": [
+    {
+      "path": ".github/actions/ai-review/action.yml",
+      "original_sha256": "efdb80f533715b3493cf75c534c4c1e1732c422d57f505da29d700e97ca8e231",
+      "sha256": "9de98b982a6f9f2b7fc07f44a02f9d42c773867a069f4a28418613ac55724a46"
+    },
+    {
+      "path": ".github/actions/api-schemathesis/action.yml",
+      "original_sha256": "2f21f938982c4693c364d516d8bfa86f6c07706c31060203c127278d5bd7f278",
+      "sha256": "88e371df2d516edf7d5d0a65a796ef62518268c1f86d9b1cb56ea7365e4cd96e"
+    },
+    {
+      "path": ".github/actions/cache-content/action.yml",
+      "original_sha256": "af15cc58405aca7e70d4de6e6173beb41102622cd72fe987d7115d8c8509dd85",
+      "sha256": "40ac9340be848fc84cba8b297007e67282c7367875940140118da4790ed79f1b"
+    },
+    {
+      "path": ".github/actions/ensure-results/action.yml",
+      "original_sha256": "33a30bbd9b3d20f470004e9122fea0474aa47899759ae127f3aebd7f0196f300",
+      "sha256": "da9a31f8f61b5e11f8bc3ce89dce6d2289fe696f365e2c4edfc262e9dcbe5432"
+    },
+    {
+      "path": ".github/actions/gate-evaluate/action.yml",
+      "original_sha256": "6dd258055aec1d19cf15216919e7332e75832133e2058993d8dc18447cc16027",
+      "sha256": "54b516b55819ee1dc4da137c99ee57aea6f3f09698f0451104e8a48b75fdf97d"
+    },
+    {
+      "path": ".github/actions/iac-scan/action.yml",
+      "original_sha256": "807dbfba53edb639cbd099a93110e231e88aa0350b84025306070c870ea38e09",
+      "sha256": "f743b36ead50385585c608e817e157d8640971f41c17a512eb82ad115b26a360"
+    },
+    {
+      "path": ".github/actions/malware-scan/action.yml",
+      "original_sha256": "15de11bab3910b1d78b0b1f0be5058d400994f38cb87e22116f96ad527cc35dc",
+      "sha256": "835bf012f7f39e18afa55135dc1ae769f07d2124f5e5c0531441ca5719ce4120"
+    },
+    {
+      "path": ".github/actions/sandbox-exec/action.yml",
+      "original_sha256": "132b3b690e8316438821f136b2587d63973b1cf296b43bbd39a4752964d352bd",
+      "sha256": "5512613d6af89034b9cc65160099345e17b844914b88c1097a5bbb30bc4e93f4"
+    },
+    {
+      "path": ".github/actions/sast-codeql/action.yml",
+      "original_sha256": "fad3406810833ecd21f4ee66c0bc30ce721247f418c212ea87136ae00744213d",
+      "sha256": "7fc04de397aff9426387fabbc5b09d2ed169c3290330c77e2f56750a7b60280d"
+    },
+    {
+      "path": ".github/actions/sast-ecosystem/action.yml",
+      "original_sha256": "670dc2780959593087e3782374b3bd0158f6b31f4a7c3071b842f6fec4543b0c",
+      "sha256": "d6e35250fbe7556e7354fe3cd1b331cc6347a93f8dafe8504c2d9668c95d292a"
+    },
+    {
+      "path": ".github/actions/sast-semgrep/action.yml",
+      "original_sha256": "af6ccc2a4d8995e6d8d9b3994a7d88bd8eeff9aad2d6aa135031f712dd1a0868",
+      "sha256": "6a84f4e849b9e9e935ac4fe26051e734957a02087aa15c0958173602928c92ae"
+    },
+    {
+      "path": ".github/actions/sast-shellcheck/action.yml",
+      "original_sha256": "773c1bbdf94aabcacbf7791e26976afcb292b401ace0467eab11c1d839ddfda1",
+      "sha256": "97101f20bc2c5b001c3830f0c346aad111f8293f7ada2b9575ee2df24660a42b"
+    },
+    {
+      "path": ".github/scripts/ai_review_call.py",
+      "original_sha256": "5b8a735598d1ff21a4ef0bcacd96a6e7dc51c06ec5f6bbad06ea6ec675be4976",
+      "sha256": "f98a9f59eaf6adf5fb395d504104f121525b6ea3db1e64d018d3b2cb1aebd709"
+    },
+    {
+      "path": ".github/scripts/asset_scan.py",
+      "original_sha256": "ee12a2fe0a5262b3ae2b5e4abc9a907070d138d82af5ebc0ef536c812eea501e",
+      "sha256": "639df762fc496b8940d355bd40b6030983cd3fb6e55773a7110dca570a290e56"
+    },
+    {
+      "path": ".github/scripts/audit_projection.py",
+      "original_sha256": null,
+      "sha256": "8bdb6be4b7b887ec8ecf886d103e20254cb8563e286ec7e6f194aafbc4d811c8"
+    },
+    {
+      "path": ".github/scripts/cache_inspect.py",
+      "original_sha256": "2dccce740227f107deb15277db0a08b5b94d4e6a5fae88021a4293395185ee3f",
+      "sha256": "287d2f8def15d018a2718692f2c832bafdc64505e6dcbadbc46d9e0092d87855"
+    },
+    {
+      "path": ".github/scripts/codeql_isolated.py",
+      "original_sha256": null,
+      "sha256": "30e91df01fd7824cbc2ac9c6a4afa08642fe6480c6f3567ab2262708118556ba"
+    },
+    {
+      "path": ".github/scripts/count_blocking.py",
+      "original_sha256": "8ffb8d705cbcf21263fe6fc8a9d05f2d9f53402cec379b517ebdfb85ec72be28",
+      "sha256": "7dcd256d297744dbaade3e9be5bcd1cc27d1c44f93a665d2b3141215b5d12ce8"
+    },
+    {
+      "path": ".github/scripts/detect_ecosystems.py",
+      "original_sha256": "f74863e748aa9e7760fdb21bbb5e41c2ceb26ada6965bed68b9213957d0fb939",
+      "sha256": "a490464511023fb51f51e358b9627816a1b3fc99cb6488a8d9988b9de8fadfb5"
+    },
+    {
+      "path": ".github/scripts/gate_diagnostics.py",
+      "original_sha256": null,
+      "sha256": "1e3bb3afb9b4ac8733e75c7ce0d1404c195c93af2bcaa5e857f8b14421c5392d"
+    },
+    {
+      "path": ".github/scripts/pnpm_audit_result.py",
+      "original_sha256": null,
+      "sha256": "c300bd0d5337cb97b5ee0cfae1a23377297f7bf25b25bbc660ec5a9afaaa7669"
+    },
+    {
+      "path": ".github/scripts/python_tool_install.py",
+      "original_sha256": null,
+      "sha256": "2933bf9242cda589f134731e6225d93b490706d90a2fdbfa4ab749fa4ca23303"
+    },
+    {
+      "path": ".github/scripts/result.py",
+      "original_sha256": "abb840e8112028bd55c73fa9f153a283f9ca21f344a4bcb2655b5a167f652236",
+      "sha256": "4537fa6f94a5e9cc4c834c634c09da4ebb94308d1c193c5d9fde2b9168bc3080"
+    },
+    {
+      "path": ".github/scripts/shell_audit.py",
+      "original_sha256": "9c6062dd956ded82aa520e0695e98294d1b437dccaae3df4f206bf4df87dcf4a",
+      "sha256": "3489db2fa77fe2254ed6cba1edbfe99bbf7094941b7b4e31c3fb1a055af4c3a7"
+    },
+    {
+      "path": ".github/scripts/supply_chain.py",
+      "original_sha256": "bf1c1b2ff43a00e027d44d75ec618bd119a70a7b2903c216246ca04e70615cef",
+      "sha256": "528f88cc6d5a21af5c748dc2b3c3d4bffa0d81aea95dd08b6fa90b2b93754ae7"
+    },
+    {
+      "path": ".github/scripts/verify_evidence.py",
+      "original_sha256": "fa2519c62adba4a1c0726119cbcf2af52cf3e99525cf0b4f61aa574a19f20c29",
+      "sha256": "cd7683980b7876c856ea7792f4f21b2cad9d04db2737d3f07c6b110f4a1c0ba1"
+    },
+    {
+      "path": ".github/scripts/yarn_audit_result.py",
+      "original_sha256": null,
+      "sha256": "4c3a3016acc775c58b70768dc3ecd9e7f28d9d87b71fdddb29142e0da4c67e36"
+    },
+    {
+      "path": ".github/workflows/scanner-qualification.yml",
+      "original_sha256": "de4dd868fb3ebb5fc4b7e11416262f19cba5b6ba7ce39416cc5762a7b1d45b47",
+      "sha256": "f02f97d1b123efe17b2f69d68f6eb1541ae5f5a5f2d60d8ebdec00f7ed83186e"
+    },
+    {
+      "path": ".github/workflows/security-assurance.yml",
+      "original_sha256": "3999a06eb8a8114b213889641496a5fecc237038e0d1267c0fa754a48f980b41",
+      "sha256": "27da442377c393d7ce8572e1b1ae9d1523328a9422a8319abe59769494ee9d81"
+    },
+    {
+      "path": "README.md",
+      "original_sha256": "85a9666f1ebfc703ddc1e80a219203c620f36086b5aa02eec29ac5b15a7c1b8b",
+      "sha256": "0c73f4da07ad5fe167e53ca2d1ed09236e8a78ef8390792461b62941792d72c1"
+    },
+    {
+      "path": "policy/python-locks/README.md",
+      "original_sha256": null,
+      "sha256": "03b1a688398043f90b4efcd0507c9c31192f202dd0bfee321924569fb69d9dff"
+    },
+    {
+      "path": "policy/python-locks/artifacts.json",
+      "original_sha256": null,
+      "sha256": "d41285d2709e0545ae3329ba8fda5aab140ee12038e1a55d81a0f1ae83330572"
+    },
+    {
+      "path": "policy/python-locks/bandit.txt",
+      "original_sha256": null,
+      "sha256": "da7f4e338222bab32240981cdac00edf496eaf17664cf1c7bc71c1cdddb4e164"
+    },
+    {
+      "path": "policy/python-locks/checkov.txt",
+      "original_sha256": null,
+      "sha256": "272e4c54fe67095044a91ca1225d19499ac911bece0e8b515ab0ae521566425e"
+    },
+    {
+      "path": "policy/python-locks/hypothesis.txt",
+      "original_sha256": null,
+      "sha256": "072a797ed96b56dc55a38ca8a0f158877d03d3b2c295d7fac679cfa33f6a4388"
+    },
+    {
+      "path": "policy/python-locks/pip-audit.txt",
+      "original_sha256": null,
+      "sha256": "da7f4e338222bab32240981cdac00edf496eaf17664cf1c7bc71c1cdddb4e164"
+    },
+    {
+      "path": "policy/python-locks/schemathesis.txt",
+      "original_sha256": null,
+      "sha256": "57df6cc9445826bee33a61363c802f9e54c96334cfb64c5aacc735aadbb53305"
+    },
+    {
+      "path": "policy/python-locks/semgrep.txt",
+      "original_sha256": null,
+      "sha256": "de5ace81ad2d5d06da9259b6d588dc1c44b65a2f5093eb1db53a6669af930fa7"
+    },
+    {
+      "path": "qualification/test_action_input_boundaries.py",
+      "original_sha256": null,
+      "sha256": "71b711a7d22f55e4eb03c0a1820511170380ef1621d3507bb7eaa4d9b2d18885"
+    },
+    {
+      "path": "qualification/test_ai_payload_medium.py",
+      "original_sha256": null,
+      "sha256": "f443107971a150802a15d1e34a02c897cd2a0ef33b4dc24b0b69a910bd2119a1"
+    },
+    {
+      "path": "qualification/test_cache_asset_mediums.py",
+      "original_sha256": null,
+      "sha256": "74647542c78adbaac16632fa5c2c8f1554dd4dd8ef5e83539e2ecde0b7963b3d"
+    },
+    {
+      "path": "qualification/test_cache_yara_failures.py",
+      "original_sha256": null,
+      "sha256": "095f6e65f32e2002b40ad6233159060d3f554659d4384816f9ce67b610d2c851"
+    },
+    {
+      "path": "qualification/test_coverage_limits.py",
+      "original_sha256": null,
+      "sha256": "40fa1402eb5635b67bb020f8bf01643ee5759e99bbbc5a28cd7cb6ae95a88ef0"
+    },
+    {
+      "path": "qualification/test_gate_failure_artifacts.py",
+      "original_sha256": null,
+      "sha256": "164207819195693b99b9a71c1017e169a8b4eb847887d777e117259acda140ef"
+    },
+    {
+      "path": "qualification/test_integrity.py",
+      "original_sha256": "bc11925e20081ab7fab719256fe02e978026feb51aff89bb4e2e2d503a0ff8ff",
+      "sha256": "c991e5df2d1e3b8018cd204e741a44536f49bcf7494e0fcfd49100b2f3f4d0e8"
+    },
+    {
+      "path": "qualification/test_medium_authority_regressions.py",
+      "original_sha256": null,
+      "sha256": "9b2ecff69c841748ddc5d74241171cb75fd0b1c66e504a9df4bd50ac04603ac9"
+    },
+    {
+      "path": "qualification/test_python_tool_install.py",
+      "original_sha256": null,
+      "sha256": "8361b0e76fa85e6e3f29bac09e6bafd958456a76fee9d99cbd8d893b9d8a0695"
+    },
+    {
+      "path": "qualification/test_python_tool_provision.py",
+      "original_sha256": null,
+      "sha256": "7b7dcd8f343d95131092739e5153f5d97cc77cc7239b42c5a4199536c3fa86cd"
+    },
+    {
+      "path": "qualification/test_scanner_isolation.py",
+      "original_sha256": null,
+      "sha256": "48738845ba8ddf1e59090f22fc11c06e1625b76b157a41937eb48661fee2fdc8"
+    }
+  ],
+  "reconciliation": {
+    "source": "PR14 f9fa65b94fe0f2fdc068c19eaccb33ae6a78a70f + v3 exact security fixes",
+    "qualification": "Unqualified source proposal; explicit local changes are recorded without rewriting original imported-module provenance",
+    "preserved_pr14_local_patch_metadata": [
+      {
+        "path": ".github/actions/ensure-results/action.yml",
+        "from_sha256": "33a30bbd9b3d20f470004e9122fea0474aa47899759ae127f3aebd7f0196f300",
+        "to_sha256": "da9a31f8f61b5e11f8bc3ce89dce6d2289fe696f365e2c4edfc262e9dcbe5432",
+        "reason": "Input description contained the expression ${{ job.status }}. GitHub evaluates expressions in action metadata and the job context is not available there, so every job using this action failed to load it (first live run, porchlight PR #9). Description changed to plain text; behavior unchanged."
+      },
+      {
+        "path": ".github/scripts/asset_scan.py",
+        "from_sha256": "ee12a2fe0a5262b3ae2b5e4abc9a907070d138d82af5ebc0ef536c812eea501e",
+        "to_sha256": "1ce51c50bdc29ab3e68435db39e4688f3c7a8473015977165dc5e817c712207d",
+        "reason": "XML-DTD refused Apple's standard public plist DOCTYPE in every Info.plist (critical false positive, porchlight PR #9). Exactly that declaration, once, with no ENTITY and no internal subset, is now removed before parsing; every other DOCTYPE, ENTITY or internal subset stays critical (ci/test-asset-plist.py)."
+      },
+      {
+        "path": ".github/scripts/count_blocking.py",
+        "from_sha256": "8ffb8d705cbcf21263fe6fc8a9d05f2d9f53402cec379b517ebdfb85ec72be28",
+        "to_sha256": "97a1f6aadff2f11f44431109b656497a26b868fd5410ff8a354419e3caa5ba0b",
+        "reason": "Adds exact-match accepted findings, read only from the scanned repository's default branch (.security/accepted-findings.yml): rule + path + file SHA-256, reason, expiry within 366 days; matches move to an 'accepted' list in the evidence; malformed lists fail closed (ci/test-accepted-findings.py)."
+      },
+      {
+        "path": ".github/actions/sast-shellcheck/action.yml",
+        "from_sha256": "773c1bbdf94aabcacbf7791e26976afcb292b401ace0467eab11c1d839ddfda1",
+        "to_sha256": "dc983469710125e257e229ddcda1da2357fb5bb8c1d64d921445c0b4f6529771",
+        "reason": "ShellCheck ran under xargs, which reports 123 whenever shellcheck exits 1 (findings), so any repository with a ShellCheck finding got TOOL_FAILURE instead of FAIL (porchlight main, Security run 38785256092). ShellCheck now runs once over the file list so its own exit code is classified: 0 PASS, 1 FAIL, anything else TOOL_FAILURE."
+      },
+      {
+        "path": ".github/scripts/detect_ecosystems.py",
+        "from_sha256": "f74863e748aa9e7760fdb21bbb5e41c2ceb26ada6965bed68b9213957d0fb939",
+        "to_sha256": "a490464511023fb51f51e358b9627816a1b3fc99cb6488a8d9988b9de8fadfb5",
+        "reason": "CodeQL supports only build-mode none for Rust; listing rust as requiring a build made CodeQL init fail ('Rust does not support the manual build mode') and SAST-CODEQL-rust report POLICY_UNAVAILABLE (porchlight main, Security run 38785256092). Rust is now a no-build language."
+      },
+      {
+        "path": ".github/actions/sast-semgrep/action.yml",
+        "from_sha256": "af6ccc2a4d8995e6d8d9b3994a7d88bd8eeff9aad2d6aa135031f712dd1a0868",
+        "to_sha256": "067fd83421e09302ee3b227d0e6f01a20e4ae30bc01608ed77d05bc66ab88ac4",
+        "reason": "Adds p/swift to the default Semgrep registry packs. Swift CodeQL needs a macOS runner; callers may waive it (codeql_waive_languages), and Semgrep then has to actually cover Swift code."
+      },
+      {
+        "path": ".github/actions/sast-semgrep/action.yml",
+        "from_sha256": "067fd83421e09302ee3b227d0e6f01a20e4ae30bc01608ed77d05bc66ab88ac4",
+        "to_sha256": "f383ae5238f15e8485924a491b8a4599ccd110dd95add5fa305c71b405f02edb",
+        "reason": "Status followed the scanner's exit code, so exit 1 (any finding, even low or info) was FAIL. That ignored the policy's fail_on severities (release-policy.yml: semgrep critical/high, bandit high, shellcheck high) and bypassed reviewed accepted findings, which apply in count_blocking.py. Exit 0/1 now goes through count_blocking at the policy severities; any other exit, or a parse error, stays TOOL_FAILURE."
+      },
+      {
+        "path": ".github/actions/sast-ecosystem/action.yml",
+        "from_sha256": "670dc2780959593087e3782374b3bd0158f6b31f4a7c3071b842f6fec4543b0c",
+        "to_sha256": "77bf384218014f9ee9bf506b3f21e501fe88cbc81a3e1643d08c7e6c36ed6ca1",
+        "reason": "Status followed the scanner's exit code, so exit 1 (any finding, even low or info) was FAIL. That ignored the policy's fail_on severities (release-policy.yml: semgrep critical/high, bandit high, shellcheck high) and bypassed reviewed accepted findings, which apply in count_blocking.py. Exit 0/1 now goes through count_blocking at the policy severities; any other exit, or a parse error, stays TOOL_FAILURE."
+      },
+      {
+        "path": ".github/actions/sast-shellcheck/action.yml",
+        "from_sha256": "dc983469710125e257e229ddcda1da2357fb5bb8c1d64d921445c0b4f6529771",
+        "to_sha256": "97101f20bc2c5b001c3830f0c346aad111f8293f7ada2b9575ee2df24660a42b",
+        "reason": "Status followed the scanner's exit code, so exit 1 (any finding, even low or info) was FAIL. That ignored the policy's fail_on severities (release-policy.yml: semgrep critical/high, bandit high, shellcheck high) and bypassed reviewed accepted findings, which apply in count_blocking.py. Exit 0/1 now goes through count_blocking at the policy severities; any other exit, or a parse error, stays TOOL_FAILURE."
+      },
+      {
+        "path": ".github/actions/sast-codeql/action.yml",
+        "from_sha256": "fad3406810833ecd21f4ee66c0bc30ce721247f418c212ea87136ae00744213d",
+        "to_sha256": "0907a51b44ebc93fcf67d65282d27b1fb62ac4de74bec0751803a770f7371bfd",
+        "reason": "Owner decision: CodeQL runs centrally in the depot and gates there; results go into the signed evidence only and are not uploaded to GitHub code scanning (upload: never), so callers grant no security-events permission."
+      }
+    ],
+    "semantic_hold": "Resolved under strict non-starters: annotation-only rationale never removes findings; unqualified Swift CodeQL cannot pass or be waived",
+    "medium_report": "22 distinct issues mapped to source/test repairs; verified PyPI wheel locks and isolated provisioning complete; remote findings unchanged; hosted qualification and live commissioning pending"
+  }
+}

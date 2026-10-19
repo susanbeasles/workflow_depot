@@ -1,4 +1,4 @@
-"""Deterministic adapter; original imported module remains byte-for-byte intact."""
+"""Deterministic adapter over the imported module and explicit security hardening."""
 def adapt(original):
  addition='      - name: Materialize intact security-assurance module\n        run: cp -a -- .security-depot/security-assurance/. .security-depot/\n'
  text=original.replace('    inputs:\n','    inputs:\n      integration_artifact_name:\n        description: "Same-run immutable build artifact; empty keeps source-only behavior"\n        type: string\n        default: ""\n      admission_only:\n        description: "Only source admission; PASS is not release approval"\n        type: boolean\n        default: false\n',1)
@@ -7,7 +7,7 @@ def adapt(original):
  text=text.replace('results-', "results-${{ inputs.admission_only && 'admission' || 'full' }}-")
  text=text.replace('group: security-assurance-${{ github.repository }}','group: security-assurance-${{ inputs.admission_only }}-${{ github.repository }}')
  # Skip later stages only for the explicit admission phase. Default full policy is unchanged.
- for name in ['analyze','codeql','gate-stage2','ai-review','evidence-sign']:
+ for name in ['analyze','codeql-extract','codeql','gate-stage2','ai-review','evidence-sign']:
   start=text.index('\n  '+name+':'); end=text.find('\n  ',start+4)
   # Find the job-level conditional, not matrix step conditionals.
   pos=text.index('\n    if: ',start); line_end=text.index('\n',pos+1)
@@ -15,7 +15,8 @@ def adapt(original):
  lines=text.splitlines(True);result=[]
  for i,line in enumerate(lines):
   result.append(line)
-  if 'with: { repository:' in line and 'path: .security-depot' in line:result.append(addition)
+  if 'with: { repository:' in line and 'path: .security-depot' in line:
+   if i + 1 >= len(lines) or lines[i + 1] != addition.splitlines(True)[0]:result.append(addition)
  text=''.join(result)
  for name in ['admit','analyze']:
   start=text.index('\n  '+name+':');pos=text.index(addition,start)+len(addition)
@@ -33,10 +34,27 @@ def adapt(original):
  start=text.index('\n  analyze:');pos=text.index(addition,start)+len(addition)
  guard="      - if: matrix.scan == 'dast-zap' || matrix.scan == 'api-schemathesis'\n        name: Reject unapproved or public dynamic preview targets\n        env:\n          DAST_TARGET: ${{ inputs.dast_target_url }}\n          DAST_APPROVAL: ${{ inputs.dast_authorization_ref }}\n          API_TARGET: ${{ inputs.api_target_url }}\n          API_APPROVAL: ${{ inputs.api_authorization_ref }}\n        run: |\n          node --input-type=module <<'JS'\n          import {previewTarget} from './.security-depot/ci/preview-guard.mjs';\n          previewTarget(process.env.DAST_TARGET,process.env.DAST_APPROVAL);\n          previewTarget(process.env.API_TARGET,process.env.API_APPROVAL);\n          JS\n"
  text=text[:pos]+guard+text[pos:]
- start=text.index('\n  codeql:');pos=text.index(addition,start)+len(addition)
- text=text[:pos]+'      - name: Apply owned CodeQL Advanced configuration\n        run: python3 .security-depot/ci/materialize-codeql.py\n'+text[pos:]
- # Accepted findings are read from the scanned repository's default branch, never from the
- # commit under test (scripts/count_blocking.py).
+ # CodeQL now selects the bundled security-extended suite explicitly in an
+ # isolated CLI process; no dynamically materialized action configuration.
+ # Local composite actions load their nested remote actions when the step runs. Keep
+ # the no-target path outside the ZAP composite so an inapplicable scan cannot fail
+ # while preparing its third-party action under the caller's Actions policy.
+ zap_step="      - if: matrix.scan == 'dast-zap'\n        uses: ./.security-depot/.github/actions/dast-zap\n"
+ assert text.count(zap_step)==1
+ text=text.replace(zap_step,"""      - if: matrix.scan == 'dast-zap' && inputs.dast_target_url == ''
+        name: Report DAST applicability without loading ZAP
+        env:
+          WEB_APP_DETECTED: ${{ fromJSON(needs.detect.outputs.ecosystems).web_app }}
+        run: |
+          if [ "$WEB_APP_DETECTED" = "false" ]; then
+            python3 "$DEPOT/.github/scripts/result.py" --control DAST-ZAP --domain B --status NOT_APPLICABLE --reason "no web application framework detected and no target supplied" --tool zap
+          else
+            python3 "$DEPOT/.github/scripts/result.py" --control DAST-ZAP --domain B --status POLICY_UNAVAILABLE --reason "web application detected or applicability unknown but no authorized isolated DAST target was supplied; dynamic testing did not run" --tool zap
+          fi
+      - if: matrix.scan == 'dast-zap' && inputs.dast_target_url != ''
+        uses: ./.security-depot/.github/actions/dast-zap
+""")
+ # Optional default-branch rationale is metadata only; count_blocking retains all findings.
  env_anchor='  DEPOT: ${{ github.workspace }}/.security-depot\n'
  assert text.count(env_anchor)==1
  text=text.replace(env_anchor,env_anchor+'  ACCEPTED_REPO: ${{ github.workspace }}/src\n  ACCEPTED_REF: refs/remotes/origin/${{ github.event.repository.default_branch }}\n')
@@ -51,22 +69,7 @@ def adapt(original):
  setup_py='        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0\n        with: { python-version: "3.12" }\n'
  assert text.count(setup_py)==1
  text=text.replace(setup_py,'        name: Python venv over the system interpreter (keeps its PyYAML)\n        run: |\n          /usr/bin/python3 -c "import yaml"\n          /usr/bin/python3 -m venv --system-site-packages "$RUNNER_TEMP/pyenv"\n          echo "$RUNNER_TEMP/pyenv/bin" >> "$GITHUB_PATH"\n          # Depot scanner installs must not seed the pip cache that CACHE-CONTENT audits.\n          echo "PIP_NO_CACHE_DIR=1" >> "$GITHUB_ENV"\n')
- # Caller-waived CodeQL languages (space-separated). A waived language reports NOT_APPLICABLE with the
- # waiver in its reason, so it is named in the evidence instead of silently absent; the other
- # languages still gate, and SAST-SEMGREP (which includes p/swift) still gates the waived code.
- waive_in='      codeql_waive_languages:\n        description: "Space-separated CodeQL languages the caller waives; only swift (covered by Semgrep p/swift) is honored, others still run"\n        type: string\n        default: ""\n'
- text=text.replace('    inputs:\n','    inputs:\n'+waive_in,1)
- codeql_step='      - uses: ./.security-depot/.github/actions/sast-codeql\n'
- assert text.count(codeql_step)==1
- # Only languages with a Semgrep pack in the default registry list may be waived (today: swift);
- # any other listed language is ignored and CodeQL still runs on it.
- waived="matrix.language == 'swift' && contains(format(' {0} ', inputs.codeql_waive_languages), format(' {0} ', matrix.language))"
- text=text.replace(codeql_step,
-  "      - name: CodeQL waived by caller\n        if: ${{ "+waived+" }}\n"
-  "        run: python3 .security-depot/.github/scripts/result.py --control \"SAST-CODEQL-${{ matrix.language }}\" --domain A --status NOT_APPLICABLE --reason \"waived by caller (codeql_waive_languages); SAST-SEMGREP still gates this code\" --tool codeql\n"
-  "      - if: ${{ !("+waived+") }}\n        uses: ./.security-depot/.github/actions/sast-codeql\n")
- # CodeQL results are not uploaded to GitHub code scanning (sast-codeql: upload: never),
- # so the job needs no security-events permission.
+ # SARIF stays local to signed evidence; no code-scanning write authority is needed.
  perm='    permissions: { contents: read, security-events: write }\n'
  assert text.count(perm)==1
  text=text.replace(perm,'    permissions: { contents: read }\n')

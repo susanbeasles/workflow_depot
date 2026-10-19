@@ -23,9 +23,11 @@ jobs:
     # The most any pipeline job needs; each job inside grants itself less.
     permissions:
       contents: read # checkout
-      id-token: write # shadow and promote (authorizer)
+      id-token: write # build (attestation), shadow and promote (authorizer)
+      attestations: write # build (attestation)
     # Every input is optional; the defaults suit a Node repository with package-lock.json. For example:
     # with:
     #   working-directory: app
     #   test: npm test -- --test-reporter=spec
     #   artifact-path: dist
+    #   require-attestation: false   # only where GitHub attestations are unavailable

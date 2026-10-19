@@ -24,13 +24,24 @@ jobs:
       - run: sudo apt-get install -y -qq bubblewrap
       - run: python3 qualification/test_gate.py
       - run: python3 qualification/test_scanners.py
+      - name: Security boundary regressions (synthetic only)
+        run: |
+          set -e
+          for test in test_action_input_boundaries test_scanner_isolation test_coverage_limits test_ai_payload_medium test_cache_asset_mediums test_cache_yara_failures test_medium_authority_regressions test_python_tool_install test_python_tool_provision test_gate_failure_artifacts; do
+            python3 "qualification/$test.py"
+          done
       - run: |
           python3 .github/scripts/install_tool.py --registry policy/tool-registry.yml --tool cosign --dest "$RUNNER_TEMP/tools"
           python3 qualification/test_integrity.py
-      - run: pip install --disable-pip-version-check -q "hypothesis==$(python3 -c "import yaml;print(yaml.safe_load(open('policy/tool-registry.yml'))['python_tools']['hypothesis'])")" && python3 qualification/test_fuzz_parsers.py --examples 150
+      - run: |
+          PYTOOLS=$(python3 .github/scripts/python_tool_install.py --registry policy/tool-registry.yml --tools hypothesis)
+          export PATH="$PYTOOLS:$PATH"
+          python3 qualification/test_fuzz_parsers.py --examples 150
       - name: Local end-to-end (real action steps) on generated hostile + clean repos
         run: |
-          pip install --disable-pip-version-check -q "semgrep==$(python3 -c "import yaml;print(yaml.safe_load(open('policy/tool-registry.yml'))['python_tools']['semgrep'])")" "checkov==$(python3 -c "import yaml;print(yaml.safe_load(open('policy/tool-registry.yml'))['python_tools']['checkov'])")"
+          SEMGREP_TOOLS=$(python3 .github/scripts/python_tool_install.py --registry policy/tool-registry.yml --tools semgrep)
+          CHECKOV_TOOLS=$(python3 .github/scripts/python_tool_install.py --registry policy/tool-registry.yml --tools checkov)
+          export PATH="$SEMGREP_TOOLS:$CHECKOV_TOOLS:$PATH"
           python3 qualification/fixtures.py "$RUNNER_TEMP/fx"
           set +e; python3 qualification/run_local.py --repo "$RUNNER_TEMP/fx/hostile-repo" --out "$RUNNER_TEMP/run-hostile" --stages 0; H=$?
           python3 qualification/run_local.py --repo "$RUNNER_TEMP/fx/clean-repo" --out "$RUNNER_TEMP/run-clean" --stages 0,2 --skip malware-scan; C=$?; set -e
@@ -61,8 +72,10 @@ jobs:
   dogfood:
     name: full pipeline on this repo (positive fixtures excluded by .scanignore)
     needs: unit
+    # Privileged qualification is only for the protected main revision; PR fixtures stay read-only.
+    if: github.repository == 'susanbeasles/workflow_depot' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')
     uses: ./.github/workflows/security-assurance.yml
-    permissions: { contents: read, security-events: write, id-token: write }
+    permissions: { contents: read, id-token: write }
     with:
       depot_repository: ${{ github.repository }}
       depot_ref: ${{ github.sha }}

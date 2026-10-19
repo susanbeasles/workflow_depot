@@ -333,13 +333,18 @@ export function validateMigrationsLedger(l){
  return l;
 }
 
-export function validateAuthorizationPolicy(p){
+export function validateAuthorizationPolicy(p,{createdAt,now=Date.now()}={}){
  const label=SCHEMAS.policy;
  keys(p,['schema','policyVersion','application','repository','repositoryId','releasePrefix','sourceCommit','releaseTag','signer','targets','environments','expiresAt'],[],label);
  req(p.schema===SCHEMAS.policy&&p.policyVersion===1,`${label}: wrong schema or policyVersion`);
  req(matches(APPLICATION_ID,p.application)&&matches(REPOSITORY,p.repository)&&positive(p.repositoryId),`${label}: invalid identity`);
  req(p.releasePrefix===`${p.application}/`,`${label}: releasePrefix must be <application>/`);
  req(matches(SHA40,p.sourceCommit)&&matches(RELEASE_TAG,p.releaseTag)&&isTimestamp(p.expiresAt),`${label}: invalid release binding`);
+ if(createdAt!==undefined){
+  req(isTimestamp(createdAt)&&Date.parse(createdAt)<=now,`${label}: invalid or future release creation time`);
+  const validity=Date.parse(p.expiresAt)-Date.parse(createdAt);
+  req(validity>0&&validity<=400*86400000,`${label}: expiry must be positive and at most 400 days from signed release creation time`);
+ }
  keys(p.signer,['issuer','identity'],[],`${label}.signer`);
  req(p.signer.issuer===GITHUB_ISSUER,`${label}: signer issuer must be GitHub Actions OIDC`);
  req(typeof p.signer.identity==='string'&&p.signer.identity.startsWith('https://github.com/')&&WORKFLOW_REF.test(p.signer.identity.slice(19)),`${label}: signer identity must be a SHA-pinned workflow`);

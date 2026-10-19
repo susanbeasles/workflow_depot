@@ -1,30 +1,21 @@
-# Accepted findings
+# Finding rationale annotations
 
-Some security-assurance findings are correct matches on harmless content. Examples:
-
-- documentation that describes an attack the product detects (`curl | sh`);
-- agent instructions that forbid it;
-- Apple's standard plist header.
-
-A repository records these in `.security/accepted-findings.yml`:
+`.security/accepted-findings.yml` retains the existing entry format for reviewed rationale. It does not waive a finding, change its severity or reduce a blocking count. A confirmed High or Critical finding still blocks after its rationale is recorded.
 
 ```yaml
 version: 1
 accepted:
-  - rule: SUSP_Shell_Curl_Pipe_Sh          # the scanner's rule id
-    path: README.md                        # relative to the repository root
-    sha256: <sha256 of the file's bytes>   # sha256sum README.md
-    reason: Documents the attack Porchlight detects.
-    expires: 2027-04-15                    # at most 366 days ahead
+  - rule: SUSP_Shell_Curl_Pipe_Sh
+    path: README.md
+    sha256: <SHA-256 of the exact file bytes>
+    reason: Documents the attack the product detects; remediation remains required.
+    expires: 2027-04-15
 ```
 
-| Rule | How it works |
-|---|---|
-| Source of truth | The list is read from the repository's **default branch**, never from the commit under test. A change can't accept its own findings: the list must be reviewed and merged first. Add `.security/` to CODEOWNERS. |
-| Exact match only | A finding is accepted only when its rule, path and the file's current SHA-256 all match. Any edit to the file blocks again until the entry is renewed. |
-| Recorded, not hidden | Accepted findings move from `items` to `accepted` in the evidence, with their reason and expiry, so the signed evidence bundle still shows them. |
-| Fails closed | A malformed list, a missing reason, an expiry more than 366 days out, or an unknown key fails the control (`TOOL_FAILURE`). Expired entries are ignored. |
-| Scope | Applied where a scanner counts findings with `count_blocking.py` in a job that checked out full history: the stage-0 admission scans. |
+Entries come from the repository default branch, never the commit under test. Exact rule, path and current file digest must match. A reason and unexpired date at most 366 days ahead are required. Malformed entries fail closed; missing metadata or expired entries provide no annotation.
 
-Implementation: `security-assurance/.github/scripts/count_blocking.py`, wired through
-`ACCEPTED_REPO` and `ACCEPTED_REF` in `ci/adapt_security.py`. Tests: `ci/test-accepted-findings.py`.
+Matching rationale appears in `acceptance_annotations` with an item index, exact identity, reason and expiry. The original `items` array remains intact. Recounting annotated evidence is idempotent. Legacy evidence that moved findings into a nonempty `accepted` array fails closed and must be re-normalized from original evidence; it cannot certify an empty blocking set.
+
+`ACCEPTED_REPO` and `ACCEPTED_REF` identify optional read-only default-branch metadata in the proposed adapter. Missing refs never authorize suppression. Tests in `ci/test-accepted-findings.py` verify the original High/Critical count remains blocking after annotation, exact-match validation, expiry, malformed entries, repeated counting and legacy-evidence refusal.
+
+Swift CodeQL coverage remains required and explicitly unqualified in the permitted runner boundary. Its control reports `POLICY_UNAVAILABLE` rather than caller-waived `NOT_APPLICABLE` or replacement `PASS`. Semgrep's Swift rules remain additional coverage. A reviewed qualified CodeQL execution boundary and final evidence are still required before Swift can pass.

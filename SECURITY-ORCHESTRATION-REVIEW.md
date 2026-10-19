@@ -1,5 +1,31 @@
 # Security orchestration integration review
 
+## Security remediation of the imported baseline
+
+The original archive manifest remains unchanged as provenance. The explicit
+`security-assurance-hardening.json` records original and current hashes for each
+changed or added module file; the import check verifies these records and the
+generated adapter. The statements below about unchanged module files describe
+the initial import, not this remediation.
+
+Source resolution binds privileged code to the executing reusable workflow's
+GitHub OIDC `job_workflow_sha`. Candidate build/extraction jobs have no signing
+authority; final signing consumes data on a separate runner. CodeQL extraction
+and analysis use an offline sandbox with trusted query suites. Package audits use
+data-only manifests and depot-selected toolchains, preserving advisory lookup;
+this projection is not a general sandbox. Input arguments are separated from
+shell source, scanner coverage omissions block, and final gate metadata is
+included in the authenticated archive before promotion output is exposed.
+
+These changes require GitHub-hosted qualification before release. Offline
+CodeQL builds need their toolchains and dependencies available inside the allowed
+mounts; unavailable inputs fail closed. The distributed PR qualification
+workflow still needs a reviewed immutable callee revision before its OIDC trust
+finding can be considered remediated. No scans, signatures or gate controls have
+been removed to hide these prerequisites.
+
+## Initial import record
+
 This import preserves the complete supplied security-assurance v3 module, including its original policies, rules, actions, qualification records and both binary Hypothesis caches. The owner confirms comprehensive testing on creation. The v3 completion matrix is the factual source for coverage; the older coverage/README tables are retained as historical source, not used to declare current gaps. Cache/artifact/archive and binary inspection are implemented. No scanners or gate controls were replaced, disabled or softened.
 
 The root `.github/workflows/security-assurance.yml` is a workflow_call entrypoint. The root adapter materializes the unchanged module and adds reviewed phase isolation, retained-build verification, private-preview guards and owned CodeQL configuration without changing any of the 76 imported files. No application caller, scheduled scan, root qualification trigger or public DAST target is activated by this import. `security-assurance-import.json` binds every original file to the verified archive; the base64 staging blob is not source.

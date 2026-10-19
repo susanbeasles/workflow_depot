@@ -29,17 +29,17 @@
     },
     {
       "path": ".github/actions/sast-ecosystem/action.yml",
-      "sha256": "77bf384218014f9ee9bf506b3f21e501fe88cbc81a3e1643d08c7e6c36ed6ca1",
+      "sha256": "670dc2780959593087e3782374b3bd0158f6b31f4a7c3071b842f6fec4543b0c",
       "mode": 420
     },
     {
       "path": ".github/actions/sast-shellcheck/action.yml",
-      "sha256": "97101f20bc2c5b001c3830f0c346aad111f8293f7ada2b9575ee2df24660a42b",
+      "sha256": "773c1bbdf94aabcacbf7791e26976afcb292b401ace0467eab11c1d839ddfda1",
       "mode": 420
     },
     {
       "path": ".github/actions/sast-semgrep/action.yml",
-      "sha256": "f383ae5238f15e8485924a491b8a4599ccd110dd95add5fa305c71b405f02edb",
+      "sha256": "af6ccc2a4d8995e6d8d9b3994a7d88bd8eeff9aad2d6aa135031f712dd1a0868",
       "mode": 420
     },
     {
@@ -84,7 +84,7 @@
     },
     {
       "path": ".github/actions/sast-codeql/action.yml",
-      "sha256": "0907a51b44ebc93fcf67d65282d27b1fb62ac4de74bec0751803a770f7371bfd",
+      "sha256": "fad3406810833ecd21f4ee66c0bc30ce721247f418c212ea87136ae00744213d",
       "mode": 420
     },
     {
@@ -109,7 +109,7 @@
     },
     {
       "path": ".github/actions/ensure-results/action.yml",
-      "sha256": "da9a31f8f61b5e11f8bc3ce89dce6d2289fe696f365e2c4edfc262e9dcbe5432",
+      "sha256": "33a30bbd9b3d20f470004e9122fea0474aa47899759ae127f3aebd7f0196f300",
       "mode": 420
     },
     {
@@ -169,12 +169,12 @@
     },
     {
       "path": ".github/scripts/asset_scan.py",
-      "sha256": "1ce51c50bdc29ab3e68435db39e4688f3c7a8473015977165dc5e817c712207d",
+      "sha256": "ee12a2fe0a5262b3ae2b5e4abc9a907070d138d82af5ebc0ef536c812eea501e",
       "mode": 493
     },
     {
       "path": ".github/scripts/detect_ecosystems.py",
-      "sha256": "a490464511023fb51f51e358b9627816a1b3fc99cb6488a8d9988b9de8fadfb5",
+      "sha256": "f74863e748aa9e7760fdb21bbb5e41c2ceb26ada6965bed68b9213957d0fb939",
       "mode": 493
     },
     {
@@ -234,7 +234,7 @@
     },
     {
       "path": ".github/scripts/count_blocking.py",
-      "sha256": "97a1f6aadff2f11f44431109b656497a26b868fd5410ff8a354419e3caa5ba0b",
+      "sha256": "8ffb8d705cbcf21263fe6fc8a9d05f2d9f53402cec379b517ebdfb85ec72be28",
       "mode": 493
     },
     {
@@ -384,67 +384,5 @@
     }
   ],
   "validation_baseline": "Owner confirms comprehensive validation completed on creation; supplied qualification records preserved. Import tests do not rerun scanners.",
-  "adapter": "Root reusable workflow materializes unchanged module after each pinned depot checkout; module workflow files themselves remain unchanged.",
-  "local_patches": [
-    {
-      "path": ".github/actions/ensure-results/action.yml",
-      "from_sha256": "33a30bbd9b3d20f470004e9122fea0474aa47899759ae127f3aebd7f0196f300",
-      "to_sha256": "da9a31f8f61b5e11f8bc3ce89dce6d2289fe696f365e2c4edfc262e9dcbe5432",
-      "reason": "Input description contained the expression ${{ job.status }}. GitHub evaluates expressions in action metadata and the job context is not available there, so every job using this action failed to load it (first live run, porchlight PR #9). Description changed to plain text; behavior unchanged."
-    },
-    {
-      "path": ".github/scripts/asset_scan.py",
-      "from_sha256": "ee12a2fe0a5262b3ae2b5e4abc9a907070d138d82af5ebc0ef536c812eea501e",
-      "to_sha256": "1ce51c50bdc29ab3e68435db39e4688f3c7a8473015977165dc5e817c712207d",
-      "reason": "XML-DTD refused Apple's standard public plist DOCTYPE in every Info.plist (critical false positive, porchlight PR #9). Exactly that declaration, once, with no ENTITY and no internal subset, is now removed before parsing; every other DOCTYPE, ENTITY or internal subset stays critical (ci/test-asset-plist.py)."
-    },
-    {
-      "path": ".github/scripts/count_blocking.py",
-      "from_sha256": "8ffb8d705cbcf21263fe6fc8a9d05f2d9f53402cec379b517ebdfb85ec72be28",
-      "to_sha256": "97a1f6aadff2f11f44431109b656497a26b868fd5410ff8a354419e3caa5ba0b",
-      "reason": "Adds exact-match accepted findings, read only from the scanned repository's default branch (.security/accepted-findings.yml): rule + path + file SHA-256, reason, expiry within 366 days; matches move to an 'accepted' list in the evidence; malformed lists fail closed (ci/test-accepted-findings.py)."
-    },
-    {
-      "path": ".github/actions/sast-shellcheck/action.yml",
-      "from_sha256": "773c1bbdf94aabcacbf7791e26976afcb292b401ace0467eab11c1d839ddfda1",
-      "to_sha256": "dc983469710125e257e229ddcda1da2357fb5bb8c1d64d921445c0b4f6529771",
-      "reason": "ShellCheck ran under xargs, which reports 123 whenever shellcheck exits 1 (findings), so any repository with a ShellCheck finding got TOOL_FAILURE instead of FAIL (porchlight main, Security run 38785256092). ShellCheck now runs once over the file list so its own exit code is classified: 0 PASS, 1 FAIL, anything else TOOL_FAILURE."
-    },
-    {
-      "path": ".github/scripts/detect_ecosystems.py",
-      "from_sha256": "f74863e748aa9e7760fdb21bbb5e41c2ceb26ada6965bed68b9213957d0fb939",
-      "to_sha256": "a490464511023fb51f51e358b9627816a1b3fc99cb6488a8d9988b9de8fadfb5",
-      "reason": "CodeQL supports only build-mode none for Rust; listing rust as requiring a build made CodeQL init fail ('Rust does not support the manual build mode') and SAST-CODEQL-rust report POLICY_UNAVAILABLE (porchlight main, Security run 38785256092). Rust is now a no-build language."
-    },
-    {
-      "path": ".github/actions/sast-semgrep/action.yml",
-      "from_sha256": "af6ccc2a4d8995e6d8d9b3994a7d88bd8eeff9aad2d6aa135031f712dd1a0868",
-      "to_sha256": "067fd83421e09302ee3b227d0e6f01a20e4ae30bc01608ed77d05bc66ab88ac4",
-      "reason": "Adds p/swift to the default Semgrep registry packs. Swift CodeQL needs a macOS runner; callers may waive it (codeql_waive_languages), and Semgrep then has to actually cover Swift code."
-    },
-    {
-      "path": ".github/actions/sast-semgrep/action.yml",
-      "from_sha256": "067fd83421e09302ee3b227d0e6f01a20e4ae30bc01608ed77d05bc66ab88ac4",
-      "to_sha256": "f383ae5238f15e8485924a491b8a4599ccd110dd95add5fa305c71b405f02edb",
-      "reason": "Status followed the scanner's exit code, so exit 1 (any finding, even low or info) was FAIL. That ignored the policy's fail_on severities (release-policy.yml: semgrep critical/high, bandit high, shellcheck high) and bypassed reviewed accepted findings, which apply in count_blocking.py. Exit 0/1 now goes through count_blocking at the policy severities; any other exit, or a parse error, stays TOOL_FAILURE."
-    },
-    {
-      "path": ".github/actions/sast-ecosystem/action.yml",
-      "from_sha256": "670dc2780959593087e3782374b3bd0158f6b31f4a7c3071b842f6fec4543b0c",
-      "to_sha256": "77bf384218014f9ee9bf506b3f21e501fe88cbc81a3e1643d08c7e6c36ed6ca1",
-      "reason": "Status followed the scanner's exit code, so exit 1 (any finding, even low or info) was FAIL. That ignored the policy's fail_on severities (release-policy.yml: semgrep critical/high, bandit high, shellcheck high) and bypassed reviewed accepted findings, which apply in count_blocking.py. Exit 0/1 now goes through count_blocking at the policy severities; any other exit, or a parse error, stays TOOL_FAILURE."
-    },
-    {
-      "path": ".github/actions/sast-shellcheck/action.yml",
-      "from_sha256": "dc983469710125e257e229ddcda1da2357fb5bb8c1d64d921445c0b4f6529771",
-      "to_sha256": "97101f20bc2c5b001c3830f0c346aad111f8293f7ada2b9575ee2df24660a42b",
-      "reason": "Status followed the scanner's exit code, so exit 1 (any finding, even low or info) was FAIL. That ignored the policy's fail_on severities (release-policy.yml: semgrep critical/high, bandit high, shellcheck high) and bypassed reviewed accepted findings, which apply in count_blocking.py. Exit 0/1 now goes through count_blocking at the policy severities; any other exit, or a parse error, stays TOOL_FAILURE."
-    },
-    {
-      "path": ".github/actions/sast-codeql/action.yml",
-      "from_sha256": "fad3406810833ecd21f4ee66c0bc30ce721247f418c212ea87136ae00744213d",
-      "to_sha256": "0907a51b44ebc93fcf67d65282d27b1fb62ac4de74bec0751803a770f7371bfd",
-      "reason": "Owner decision: CodeQL runs centrally in the depot and gates there; results go into the signed evidence only and are not uploaded to GitHub code scanning (upload: never), so callers grant no security-events permission."
-    }
-  ]
+  "adapter": "Root reusable workflow materializes unchanged module after each pinned depot checkout; module workflow files themselves remain unchanged."
 }

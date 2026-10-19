@@ -1,4 +1,4 @@
-"""Accepted findings: default-branch only, exact rule+path+file digest, reason and expiry, fail closed."""
+"""Acceptance rationale annotates exact default-branch matches without suppressing findings."""
 import datetime, hashlib, json, os, pathlib, subprocess, sys, tempfile
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "security-assurance/.github/scripts/count_blocking.py"
@@ -34,20 +34,39 @@ with tempfile.TemporaryDirectory() as work:
     hit = {"severity": "high", "rule": "SUSP_Shell_Curl_Pipe_Sh", "path": "src/README.md", "message": "m"}
     entry = {"rule": "SUSP_Shell_Curl_Pipe_Sh", "path": "README.md", "sha256": digest, "reason": "documents the detected attack", "expires": later}
 
-    # No list on the default branch: nothing accepted.
+    # No list on the default branch: no annotation and unchanged blocking count.
     git(repo, "add", "-A"); git(repo, "commit", "-qm", "init"); git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
     assert run(work, repo, [hit])[0] == "1"
 
     accept([entry])
     n, d = run(work, repo, [hit, {**hit, "path": "src/OTHER.md"}])
-    assert n == "1" and len(d["accepted"]) == 1 and d["accepted"][0]["accepted_reason"], (n, d)
+    assert n == "2" and d["items"] == [hit, {**hit, "path": "src/OTHER.md"}], (n, d)
+    assert len(d["acceptance_annotations"]) == 1 and d["acceptance_annotations"][0]["reason"] == entry["reason"], d
+    assert "accepted" not in d, d
+    # Both confirmed severities remain blocking after annotation, including a single original High.
+    for severity in ["high", "critical"]:
+        original = {**hit, "severity": severity}
+        n, annotated = run(work, repo, [original])
+        assert n == "1" and annotated["items"] == [original], (n, annotated)
+        assert annotated["acceptance_annotations"][0]["kind"] == "rationale-only", annotated
+    # Re-counting annotated evidence is idempotent; annotations never accumulate or lower counts.
+    f = pathlib.Path(work, "findings.json")
+    env = {**os.environ, "ACCEPTED_REPO": repo, "ACCEPTED_REF": "refs/remotes/origin/main"}
+    before = json.loads(f.read_text())
+    again = subprocess.run([sys.executable, str(SCRIPT), str(f)], env=env, capture_output=True, text=True, cwd=work)
+    assert again.stdout.strip() == "1" and json.loads(f.read_text()) == before
 
-    # Editing the file changes its digest: blocks again.
+    # Already-suppressed legacy evidence cannot silently certify zero findings.
+    f.write_text(json.dumps({"items": [], "accepted": [hit]}))
+    legacy = subprocess.run([sys.executable, str(SCRIPT), str(f)], env=env, cwd=work, capture_output=True, text=True)
+    assert legacy.stdout.strip() == "ERR"
+
+    # Editing the file changes its digest: retains its block and loses the matching annotation.
     pathlib.Path(repo, "README.md").write_text("detects curl | sh\nmore\n")
     assert run(work, repo, [hit])[0] == "1"
     pathlib.Path(repo, "README.md").write_text("detects curl | sh\n")
 
-    # Different rule on the same file: not accepted.
+    # Different rule on the same file: not annotated.
     assert run(work, repo, [{**hit, "rule": "AI-FETCH-AND-EXECUTE"}])[0] == "1"
 
     # An entry only in the commit under test (not on the default branch) is ignored.
@@ -63,7 +82,7 @@ with tempfile.TemporaryDirectory() as work:
     accept([{**entry, "reason": " "}]); assert run(work, repo, [hit])[0] == "ERR"
     accept([{**entry, "severity": "low"}]); assert run(work, repo, [hit])[0] == "ERR"
 
-    # Without the env (non-admission jobs) nothing is accepted.
+    # Without the env (non-admission jobs) annotations are unavailable and findings still block.
     accept([entry])
     assert run(work, repo, [hit], {"ACCEPTED_REF": ""})[0] == "1"
 print("OK")
