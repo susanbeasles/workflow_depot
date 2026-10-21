@@ -49,10 +49,17 @@ def rel_path(path, repo):
     ap = os.path.abspath(p)
     if ap.startswith(root + os.sep):
         return os.path.relpath(ap, root)
-    return os.path.normpath(p)
+    if os.path.isabs(p):
+        return None
+    rel = os.path.normpath(p)
+    if rel == ".." or rel.startswith(".." + os.sep):
+        return None
+    return rel
 
 
 def file_sha256(repo, rel):
+    if not rel or os.path.isabs(rel) or rel == ".." or rel.startswith(".." + os.sep):
+        return None
     full = os.path.join(repo, rel)
     if os.path.islink(full) or not os.path.isfile(full) or os.path.realpath(full) != os.path.join(os.path.realpath(repo), rel):
         return None
