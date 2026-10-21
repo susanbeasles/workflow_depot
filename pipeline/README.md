@@ -42,14 +42,15 @@ After that PR merges, for each repository:
 | `quality` | 2 | `pipeline / quality` | every run | config | `contents: read` | actionlint, zizmor, lockfile check, commit messages |
 | `security-assurance` | 3 | `pipeline / security-assurance / ...` | every run | config | `contents: read`, `security-events: write`, `id-token: write` | `.github/workflows/security-assurance.yml`: admission, analysis, final gate, signed evidence |
 | `security` | 3 | `pipeline / security` | unless cancelled | config, security-assurance | `contents: read` | security-assurance decision must be `PASS`; gitleaks (tree and commit range), `npm audit` |
-| `build` | 4 | `pipeline / build` | every run | config and the three above | `contents: read`, `id-token: write`, `attestations: write` | one build, package, `sha256`, upload, provenance attestation, `gh attestation verify`, CycloneDX and SPDX SBOM |
+| `compile` | 4 | `pipeline / compile` | every run | config and the three above | `contents: read` | working-directory check, one build, package, `sha256`, upload, CycloneDX and SPDX SBOM; no OIDC token while repository scripts run |
+| `build` | 4 | `pipeline / build` | every run where config passed (red when compile failed) | config, compile | `contents: read`, `id-token: write`, `attestations: write` | no repository code: download, digest equals compile's, provenance attestation, `gh attestation verify` |
 | `shadow` | 5 | `pipeline / shadow` | non-draft `pull_request` into `main` from this repository | build | `id-token: write` | `actions/request-shadow` |
 | `promote` | 5 | `pipeline / promote` | `push` to `shadow/pr-*` | build | `id-token: write` | `actions/request-promotion` with the artifact digest |
 | `release` | 6 | `pipeline / release / ...` | `push` to `main` or a `v*` tag, `targets.applicationManifest` set | config, build | `contents: write`, `id-token: write`, `attestations: write` | `.github/workflows/release.yml` |
-| `deploy` | 7 | `pipeline / deploy (<target>) / ...` | stage 6 released, `targets.deploy` not empty | config, release | `contents: read` | `.github/workflows/request-deployment.yml`, one leg per target |
+| `deploy` | 7 | `pipeline / deploy` | stage 6 released on `main`, `targets.deploy` not empty | config, release | none | fails closed: the authorizer OIDC `deploy` request is not wired and the PAT dispatch is forbidden |
 | `infra-apply` | 7 | `pipeline / infra-apply` | terraform, `push` to `main` | config, build | none | fails closed: not wired |
 
-For `ecosystem: terraform`, the first step of `lint-test` and `build` fails closed (no pinned OpenTofu; no
+For `ecosystem: terraform`, the first step of `lint-test` and `compile` fails closed (no pinned OpenTofu; no
 `terraform.plan` request), see docs/pipeline.md. Inputs:
 
 | Input | Default | |
@@ -57,7 +58,7 @@ For `ecosystem: terraform`, the first step of `lint-test` and `build` fails clos
 | `depot_ref` | required | the same full SHA as in `uses:`; `config` fails otherwise |
 | `require-attestation` | `true` | `false` only where GitHub attestations are unavailable |
 
-Secret, by name only, never `inherit`: `RELEASE_DISPATCH_TOKEN`, used only by `deploy`. Everything else comes from
+No secrets (never `inherit`, no named secret). Everything comes from
 `pipeline.json`, validated by `ci/pipeline-config.mjs` in `config`. Commands are npm script names run as
 `npm run "$SCRIPT"`; values reach the shell only through `env:`.
 
@@ -72,6 +73,7 @@ Secret, by name only, never `inherit`: `RELEASE_DISPATCH_TOKEN`, used only by `d
   | actions/checkout | `3d3c42e5aac5ba805825da76410c181273ba90b1` | v7.0.1 |
   | actions/setup-node | `820762786026740c76f36085b0efc47a31fe5020` | v7.0.0 |
   | actions/upload-artifact | `cf430e030ddbb5b0abf93d22962f4752f3646cd9` | v7.0.2 |
+  | actions/download-artifact | `9000827ccba6bdab643e8b6fd33ac0654aef8333` | v8.0.2 (the pin security-assurance.yml uses) |
   | actions/attest-build-provenance | `4d101475d8b20a2381f78447822ac1eab6504dd8` | v4.2.2 (wraps actions/attest `508db95d…` v4.2.1) |
 
 - Tools are pinned binaries, checked before use. **gitleaks 8.30.1**: the tarball sha256 from

@@ -51,7 +51,6 @@ jobs:
     uses: susanbeasles/workflow_depot/.github/workflows/pipeline.yml@0000000000000000000000000000000000000000 # REPLACE: reviewed workflow_depot SHA
     permissions: {contents: write, id-token: write, attestations: write, security-events: write}
     with: {depot_ref: '0000000000000000000000000000000000000000'}
-    secrets: {RELEASE_DISPATCH_TOKEN: '${{ secrets.RELEASE_DISPATCH_TOKEN }}'}
 ```
 
 | Job | Check name | Runs on | Needs |

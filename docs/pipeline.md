@@ -16,7 +16,7 @@ Every workflow below is `on: workflow_call` with `permissions: {}` at the top, e
 | `security-assurance.yml` | any event (base SHA from the PR or `before`) | `depot_repository`, `depot_ref` (+18 optional: `policy_profile`, `admission_only`, `integration_artifact_name`, DAST, CodeQL, AI review, external evidence) | `decision` (`PASS`/`FAIL`) | `ANTHROPIC_API_KEY` (optional) | `contents: read`; `security-events: write` (codeql); `id-token: write` (evidence-sign) | 3 | **yes**, job `security-assurance`, full mode (`admission_only: false`: stage 0 admission, stage 2 analysis, final gate, cosign-signed evidence bundle), source only. No secret is passed, so the AI review stays off |
 | `integration-quality.yml` | `push` to `refs/heads/int/*` only, private repositories only (its `identity` job asserts both) | `depot_repository`, `depot_ref`, `build_output`, `runner_image` (+20 optional) | none | `ANTHROPIC_API_KEY` (optional) | `contents: read`, `security-events: write`, `id-token: write` | 1 to 4 as one composition: admission, `ci/project-profile.mjs` quality and build in a digest-pinned image, full security on the build bytes, signed private release materials | **no**: it refuses `pull_request`, `main`, tags and `shadow/pr-*`, which are the events the spec runs stages 1 to 4 on. Its parts are used directly instead: security-assurance as stage 3; the same syft SBOM tool path in stage 4 |
 | `release.yml` | `push` to `refs/heads/main` or a `vX.Y.Z` tag at `github.sha` | `depot_ref` (+ `application_manifest`, `r2_account_id`, `r2_bucket`) | `released`, `releaseTag`, `manifestSha256` | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (optional) | `contents: read`; attest `id-token: write`, `attestations: write`; publish `contents: write` | 6 | **yes**, job `release`, on `main` and `v*` tag pushes after `build`. R2 publication is not wired (no secrets passed) |
-| `request-deployment.yml` | `push` to `refs/heads/main` only | `target`, `depot_ref` | none | `RELEASE_DISPATCH_TOKEN` (required) | `contents: read` | 7 | **yes**, job `deploy`, one matrix leg per `targets.deploy` entry, only when `release` published |
+| `request-deployment.yml` | `push` to `refs/heads/main` only | `target`, `depot_ref` | none | `RELEASE_DISPATCH_TOKEN` (required) | `contents: read` | 7 (PAT) | **no**: it dispatches delivery_control with a PAT, which spec 5.2/5.4 forbids. `deploy` fails closed instead until the authorizer's OIDC `deploy` request exists (section 4) |
 | `request-app-deployment.yml` | `push` to `refs/heads/main` only | `target`, `depot_ref`, `app_id`, `app_client_id`, `app_slug`, `installation_id`, `private_key_ref`, `approval_ref` | none | `OP_SERVICE_ACCOUNT_TOKEN` (optional) | `contents: read` | 7 (alternative) | **no**: same receiver as `request-deployment.yml`; it needs a 1Password service-account token and six App commissioning values per repository, and the spec (v1.2) took 1Password out of the runtime path. One stage 7 path is wired, not two |
 | `request-release.yml` | `push` to `refs/heads/main`, owner id 215839550 | none | none | `RELEASE_DISPATCH_TOKEN` | none | 6 (superseded) | **no**: dispatches a central release in delivery_control; `release.yml` publishes in the repository itself and is the stage 6 the spec describes. The spec (section 6) lists it for deletion |
 | `main-deployment.yml` | `push` to `refs/heads/main` (through `accepted-main-artifacts.yml`) | six, all tied to an `int/*` integration run and retained owner evidence | none | `RELEASE_DISPATCH_TOKEN` | `contents: read`, `actions: read` | 7 (integration-branch model) | **no**: it consumes the `integration-release-<sha>` artifact of an `integration-quality.yml` run, which this pipeline does not produce. The spec lists it for deletion |
@@ -43,10 +43,10 @@ Composite actions and helpers:
 ```
 config ─┬─ lint-test (1) ─────────────────────────────┐
         ├─ quality (2) ───────────────────────────────┤
-        └─ security-assurance (3, reusable) ─ security (3 gate) ─┴─ build (4) ─┬─ shadow (5)   pull_request into main, non-draft, same repository
-                                                                              ├─ promote (5)  push to shadow/pr-*
-                                                                              ├─ release (6)  push to main or v* tag ── deploy (7)  released, targets.deploy
-                                                                              └─ infra-apply (7, terraform)  push to main
+        └─ security-assurance (3, reusable) ─ security (3 gate) ─┴─ compile (4) ─ build (4) ─┬─ shadow (5)   pull_request into main, non-draft, same repository
+                                                                                            ├─ promote (5)  push to shadow/pr-*
+                                                                                            ├─ release (6)  push to main or v* tag ── deploy (7, fails closed)  released, targets.deploy
+                                                                                            └─ infra-apply (7, terraform)  push to main
 ```
 
 | Stage | Job | Calls | Runs when | Needs | Permissions | Pass criterion it enforces |
@@ -56,18 +56,21 @@ config ─┬─ lint-test (1) ────────────────�
 | 2 | `quality` | embedded checks | every run | config | `contents: read` | actionlint and zizmor (medium and up) on the caller's workflows, lockfile integrity, Conventional Commits. The typecheck runs in `lint-test` to share its install; strictness is the repository's script |
 | 3 | `security-assurance` | `security-assurance.yml` | every run | config | `contents: read`, `security-events: write`, `id-token: write` | stage 0 PASS, stage 2 PASS, final `gate-decision.json` PASS, evidence bundle cosign-signed keyless, every control listed with a status |
 | 3 | `security` | | every run that was not cancelled | config, security-assurance | `contents: read` | the `decision` output is `PASS`; gitleaks on tree and commit range; `npm audit` high |
-| 4 | `build` | `npm run <scripts.build>`, `package.cjs`, `attest-build-provenance`, syft | stages 1 to 3 green | config, lint-test, quality, security | `contents: read`, `id-token: write`, `attestations: write` | one build in the pinned Node version; deterministic package and `sha256`; provenance attestation on the artifact; `gh attestation verify` against `pipeline.yml@<depot_ref>`; CycloneDX and SPDX SBOM artifact |
+| 4 | `compile` | `npm run <scripts.build>`, `package.cjs`, syft | stages 1 to 3 green | config, lint-test, quality, security | `contents: read` | working directory inside the checkout; one build in the pinned Node version; deterministic package and `sha256`; CycloneDX and SPDX SBOM artifact. Lifecycle (`rebuild`) and build scripts are repository code, so this job holds no OIDC token |
+| 4 | `build` | `download-artifact`, `attest-build-provenance` | every run where `config` passed (red, never skipped, when `compile` failed) | config, compile | `contents: read`, `id-token: write`, `attestations: write` | runs no repository code; the downloaded artifact's `sha256` equals compile's digest; provenance attestation on it; `gh attestation verify` against `pipeline.yml@<depot_ref>` |
 | 5 | `shadow` | `actions/request-shadow` | `pull_request` into `main`, not a draft, not a fork | build | `id-token: write` | the authorizer builds the candidate on `shadow/pr-<n>` |
 | 5 | `promote` | `actions/request-promotion` | `push` to `shadow/pr-*` | build | `id-token: write` | the authorizer verifies the four checks and the attestation on the candidate; `main` fast-forwards to it, provenance tag |
 | 6 | `release` | `release.yml` | `push` to `main` or a `v*` tag, `targets.applicationManifest` set | config, build | `contents: write`, `id-token: write`, `attestations: write` | immutable `vX.Y.Z` from Conventional Commits; write-once GitHub Release with bundles, SBOMs, cosign and provenance bundles |
-| 7 | `deploy` | `request-deployment.yml` | stage 6 output `released == 'true'` and `targets.deploy` not empty | config, release | `contents: read` | the central receiver accepted the request (`204`) |
+| 7 | `deploy` | none | stage 6 output `released == 'true'` on `main` and `targets.deploy` not empty | config, release | none | fails closed: the authorizer OIDC `deploy` request is not wired, and the PAT dispatch is forbidden |
 | 7 (terraform) | `infra-apply` | none | terraform, `push` to `main` | config, build | none | fails closed: not wired |
 
 Rules every job follows: `permissions: {}` at the top and the minimum per job; GitHub-hosted `ubuntu-24.04`;
 `timeout-minutes` on every runner job; every `uses:` of an action pinned to a full commit SHA; nested workflows
 are `./.github/workflows/<file>`, which GitHub resolves in workflow_depot at the same commit as `pipeline.yml`;
-no `pull_request_target`; no `secrets: inherit` (the only secret is `RELEASE_DISPATCH_TOKEN`, passed by name to
-`deploy`); every checkout `persist-credentials: false`; no `${{ }}` in any `run:` block and no `eval`.
+no `pull_request_target`; no secrets at all (no `secrets: inherit`, no named secret); every checkout
+`persist-credentials: false`; no `${{ }}` in any `run:` block and no `eval`; every job that uses the
+`pipeline.json` working directory first checks that it is a real directory inside the checkout (no symlinked
+component); repository code (lifecycle and build scripts) never runs in a job that holds an OIDC token.
 
 What each event runs:
 
@@ -76,8 +79,8 @@ What each event runs:
 | `pull_request` into `main` (draft) | config, 1, 2, 3, 4 |
 | `pull_request` into `main` (ready) | config, 1, 2, 3, 4, shadow |
 | `push` to `shadow/pr-<n>` (the candidate) | config, 1, 2, 3, 4, promote |
-| `push` to `main` (the promoted candidate) | config, 1, 2, 3, 4, release, then deploy when released |
-| `push` of a `vX.Y.Z` tag | config, 1, 2, 3, 4, release (deploy is refused by `request-deployment.yml`, which accepts only `main`) |
+| `push` to `main` (the promoted candidate) | config, 1, 2, 3, 4, release, then deploy (fails closed) when released and deploy targets exist |
+| `push` of a `vX.Y.Z` tag | config, 1, 2, 3, 4, release (deploy runs only on `main`) |
 
 `depot_ref` follows `release.yml`: the caller passes the same full SHA it pinned in `uses:`. `release.yml`
 catches a mismatch late, when its signature identity check fails. `pipeline.yml` refuses it first: `config`
@@ -106,7 +109,6 @@ jobs:
     uses: susanbeasles/workflow_depot/.github/workflows/pipeline.yml@0000000000000000000000000000000000000000 # REPLACE: reviewed workflow_depot SHA
     permissions: {contents: write, id-token: write, attestations: write, security-events: write}
     with: {depot_ref: '0000000000000000000000000000000000000000'}
-    secrets: {RELEASE_DISPATCH_TOKEN: '${{ secrets.RELEASE_DISPATCH_TOKEN }}'}
 ```
 
 - The job id must be `pipeline` with no `name:`: check names are `pipeline / <job>`, and the authorizer requires
@@ -115,7 +117,7 @@ jobs:
 - The caller grants the union of what the jobs inside declare; each job keeps only its own grant. `contents:
   write` is used only by `release`, which runs only on `main` and tag pushes.
 - `cancel-in-progress` is false on `main` and tags, so a newer push never cancels a release half way.
-- Drop the `secrets:` line when `pipeline.json` lists no deploy targets.
+- The caller passes no secrets.
 
 ## 4. Gaps and open questions
 
@@ -123,14 +125,15 @@ Stages that cannot be wired from what exists, and why:
 
 1. **Stage 7 through the authorizer.** The spec says the pipeline asks the authorizer with OIDC and the
    authorizer invokes the deployer. No action asks the authorizer for `deploy`, and its subject shape is defined
-   in the authorizer, which is not available here. Wired instead, as asked: `request-deployment.yml`, which
-   dispatches delivery_control with the `RELEASE_DISPATCH_TOKEN` PAT. That contradicts spec section 5.2 (no
-   `workflow_dispatch`, no dispatch PAT) and 5.4 (GitHub holds nothing), and spec section 6 lists the workflow
-   for deletion. Replace `deploy` with a `request-deploy` action on `actions/_lib/authorizer.mjs` once the
-   authorizer's `deploy` subject is fixed.
+   in the authorizer, which is not available here. `request-deployment.yml` would dispatch delivery_control with
+   the `RELEASE_DISPATCH_TOKEN` PAT, which spec section 5.2 (no `workflow_dispatch`, no dispatch PAT) and 5.4
+   (GitHub holds nothing) forbid and section 6 lists for deletion, so it is not wired: `deploy` fails closed
+   with that reason whenever a release on `main` has deploy targets, and the pipeline takes no secret. Replace
+   that step with a `request-deploy` action on `actions/_lib/authorizer.mjs` once the authorizer's `deploy`
+   subject is fixed.
 2. **Terraform stage 4 (`terraform.plan`) and stage 7 (`terraform.apply`, `root.apply`).** Same gap: no action
    requests `infra.plan`, `infra.apply` or `root.apply`, and their subjects are not defined in this repository.
-   `build` and `infra-apply` fail closed for terraform with that message.
+   `compile` (so `build`) and `infra-apply` fail closed for terraform with that message.
 3. **Terraform stage 1.** Formatting, validation and `tofu test` need a pinned, checksum-verified OpenTofu on the
    runner. `security-assurance/policy/tool-registry.yml` has no OpenTofu entry and no checksum could be
    verified offline, so `lint-test` fails closed for terraform. Options: add OpenTofu to the tool registry with

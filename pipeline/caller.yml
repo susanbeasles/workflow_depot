@@ -1,7 +1,7 @@
 # Caller template: install as .github/workflows/pipeline.yml in each repository, next to a pipeline.json at the
 # repository root (docs/contracts.md section 12). Keep the job id `pipeline` with no `name:` (check names are
 # `pipeline / <job>`), and replace both zero SHAs with the same reviewed workflow_depot commit. shadow/pr-* is the
-# promotion candidate branch (stage 5). Drop the secrets line when pipeline.json lists no deploy targets.
+# promotion candidate branch (stage 5). The pipeline takes no secrets.
 name: pipeline
 on:
   pull_request: {branches: [main], types: [opened, synchronize, reopened, ready_for_review]}
@@ -13,4 +13,3 @@ jobs:
     uses: susanbeasles/workflow_depot/.github/workflows/pipeline.yml@0000000000000000000000000000000000000000 # REPLACE: reviewed workflow_depot SHA
     permissions: {contents: write, id-token: write, attestations: write, security-events: write}
     with: {depot_ref: '0000000000000000000000000000000000000000'}
-    secrets: {RELEASE_DISPATCH_TOKEN: '${{ secrets.RELEASE_DISPATCH_TOKEN }}'}

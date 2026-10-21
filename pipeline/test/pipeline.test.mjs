@@ -39,15 +39,17 @@ const ADR = {
   shadow: ['build'],
   promote: ['build'],
 };
-// The orchestrator around them: config gates everything, security-assurance feeds the security gate, release
-// and deploy follow build, infra-apply is the terraform stage 7.
+// The orchestrator around them: config gates everything, security-assurance feeds the security gate, compile is
+// stage 4's unprivileged half and build its attesting half, release and deploy follow build, infra-apply is the
+// terraform stage 7.
 const NEEDS = {
   config: [],
   'lint-test': ['config'],
   quality: ['config'],
   'security-assurance': ['config'],
   security: ['config', 'security-assurance'],
-  build: ['config', 'lint-test', 'quality', 'security'],
+  compile: ['config', 'lint-test', 'quality', 'security'],
+  build: ['config', 'compile'],
   shadow: ['build'],
   promote: ['build'],
   release: ['config', 'build'],
@@ -58,7 +60,6 @@ const NEEDS = {
 const REUSABLE = {
   'security-assurance': './.github/workflows/security-assurance.yml',
   release: './.github/workflows/release.yml',
-  deploy: './.github/workflows/request-deployment.yml',
 };
 const needsOf = (job) => {
   const n = wf.jobs[job].needs;
@@ -87,7 +88,7 @@ test('reusable workflow only: on workflow_call, permissions {} at top', () => {
 test('job ids and needs are exactly the orchestrator table, and keep the ADR-0002 order', () => {
   assert.deepEqual(Object.keys(wf.jobs).sort(), Object.keys(NEEDS).sort());
   for (const [job, needs] of Object.entries(NEEDS)) assert.deepEqual(needsOf(job).sort(), [...needs].sort(), `${job} needs`);
-  for (const [job, needs] of Object.entries(ADR)) for (const dep of needs) assert.ok(needsOf(job).includes(dep), `${job} must need ${dep} (ADR-0002)`);
+  for (const [job, needs] of Object.entries(ADR)) for (const dep of needs) assert.ok(transitive(job).has(dep), `${job} must follow ${dep} (ADR-0002)`);
 });
 
 test('reusable stages call this repository workflows at the same commit, with explicit permissions', () => {
@@ -103,11 +104,9 @@ test('reusable stages call this repository workflows at the same commit, with ex
     policy_profile: '${{ needs.config.outputs.policy_profile }}',
   });
   assert.deepEqual(wf.jobs.release.with, { depot_ref: '${{ inputs.depot_ref }}', application_manifest: '${{ needs.config.outputs.application_manifest }}' });
-  assert.deepEqual(wf.jobs.deploy.with, { target: '${{ matrix.target }}', depot_ref: '${{ inputs.depot_ref }}' });
-  assert.deepEqual(wf.jobs.deploy.secrets, { RELEASE_DISPATCH_TOKEN: '${{ secrets.RELEASE_DISPATCH_TOKEN }}' });
-  assert.equal(wf.jobs.deploy.strategy.matrix.target, '${{ fromJSON(needs.config.outputs.deploy_targets) }}');
   for (const job of ['security-assurance', 'release']) assert.equal(wf.jobs[job].secrets, undefined, `${job} receives no secrets`);
   assert.ok(!/secrets:\s*inherit/.test(raw), 'secrets: inherit is forbidden');
+  assert.ok(!/secrets\./.test(raw), 'the pipeline reads no secret');
 });
 
 test('job names, when set, equal the job id (the check name is `pipeline / <id>`)', () => {
@@ -121,11 +120,12 @@ test('every job: explicit minimal permissions; every runner job ubuntu-24.04 wit
     quality: { contents: 'read' },
     'security-assurance': { contents: 'read', 'security-events': 'write', 'id-token': 'write' },
     security: { contents: 'read' },
+    compile: { contents: 'read' },
     build: { contents: 'read', 'id-token': 'write', attestations: 'write' },
     shadow: { 'id-token': 'write' },
     promote: { 'id-token': 'write' },
     release: { contents: 'write', 'id-token': 'write', attestations: 'write' },
-    deploy: { contents: 'read' },
+    deploy: {},
     'infra-apply': {},
   };
   for (const [job, def] of Object.entries(wf.jobs)) {
@@ -150,10 +150,10 @@ test('every uses: is pinned to a full 40-hex SHA with a version comment, or is a
 });
 
 test('only the allowed actions are used', () => {
-  const ok = new Set(['actions/checkout', 'actions/setup-node', 'actions/upload-artifact', 'actions/attest-build-provenance', INSTALL_TOOL]);
+  const ok = new Set(['actions/checkout', 'actions/setup-node', 'actions/upload-artifact', 'actions/download-artifact', 'actions/attest-build-provenance', INSTALL_TOOL]);
   for (const { job, step } of allSteps()) if (step.uses !== undefined) assert.ok(ok.has(step.uses.split('@')[0]), `${job}: ${step.uses}`);
   const tools = allSteps().filter(({ step }) => step.uses === INSTALL_TOOL);
-  assert.deepEqual(tools.map(({ job, step }) => [job, step.with.tool]), [['build', 'syft']]);
+  assert.deepEqual(tools.map(({ job, step }) => [job, step.with.tool]), [['compile', 'syft']]);
 });
 
 test('every checkout sets persist-credentials: false', () => {
@@ -169,15 +169,14 @@ test('no ${{ }} expression inside any run: block (template injection)', () => {
   }
 });
 
-test('inputs: depot_ref and require-attestation only; one optional named secret', () => {
+test('inputs: depot_ref and require-attestation only; no secrets', () => {
   const call = wf.on.workflow_call;
   assert.deepEqual(Object.keys(call.inputs).sort(), ['depot_ref', 'require-attestation']);
   assert.equal(call.inputs.depot_ref.required, 'true');
   assert.equal(call.inputs.depot_ref.type, 'string');
   assert.equal(call.inputs['require-attestation'].type, 'boolean');
   assert.equal(call.inputs['require-attestation'].default, 'true');
-  assert.deepEqual(Object.keys(call.secrets), ['RELEASE_DISPATCH_TOKEN']);
-  assert.equal(call.secrets.RELEASE_DISPATCH_TOKEN.required, 'false');
+  assert.equal(call.secrets, undefined, 'stage 7 takes no dispatch PAT (spec 5.2/5.4)');
   assert.equal(call.outputs.released.value, '${{ jobs.release.outputs.released }}');
   assert.equal(call.outputs.release_tag.value, '${{ jobs.release.outputs.releaseTag }}');
 });
@@ -200,7 +199,7 @@ test('config: depot_ref must equal the pinned SHA before pipeline.json is read a
 
 test('repository commands are npm script names from validated config outputs, run without eval', () => {
   assert.ok(!/\beval\b/.test(raw), 'no eval anywhere');
-  const runs = { 'lint-test': ['script_lint', 'script_typecheck', 'script_test'], build: ['script_build'] };
+  const runs = { 'lint-test': ['script_lint', 'script_typecheck', 'script_test'], compile: ['script_build'] };
   for (const [job, outputs] of Object.entries(runs)) {
     for (const output of outputs) {
       const step = wf.jobs[job].steps.find((s) => s.env?.SCRIPT === `\${{ needs.config.outputs.${output} }}`);
@@ -208,7 +207,7 @@ test('repository commands are npm script names from validated config outputs, ru
       assert.equal(step.run, 'npm run "$SCRIPT"');
     }
   }
-  for (const job of ['lint-test', 'build']) {
+  for (const job of ['lint-test', 'compile']) {
     const install = wf.jobs[job].steps.find((s) => s.name === 'Install');
     assert.match(install.run, /^set -euo pipefail\nnpm ci --ignore-scripts --no-audit --no-fund\n/);
     assert.equal(install.env.REBUILD, '${{ needs.config.outputs.rebuild }}');
@@ -223,7 +222,7 @@ test('repository commands are npm script names from validated config outputs, ru
 });
 
 test('terraform: stage 1, stage 4 and stage 7 fail closed until their requests exist', () => {
-  for (const job of ['lint-test', 'build']) {
+  for (const job of ['lint-test', 'compile']) {
     const first = wf.jobs[job].steps[0];
     assert.equal(first.if, "needs.config.outputs.ecosystem == 'terraform'", `${job} first step`);
     assert.match(first.run, /exit 1\n$/);
@@ -240,8 +239,11 @@ test('shadow runs only for pull_request into main; promote only for push to shad
   assert.match(shadow, /github\.event\.pull_request\.base\.ref == 'main'/);
   assert.ok(!/push/.test(shadow));
   assert.equal(wf.jobs.promote.if, "github.event_name == 'push' && startsWith(github.ref, 'refs/heads/shadow/pr-')");
-  for (const name of ['config', 'lint-test', 'quality', 'security-assurance', 'build']) assert.equal(wf.jobs[name].if, undefined, `${name} runs on every call`);
+  for (const name of ['config', 'lint-test', 'quality', 'security-assurance', 'compile']) assert.equal(wf.jobs[name].if, undefined, `${name} runs on every call`);
   assert.equal(wf.jobs.security.if, "${{ !cancelled() && needs.config.result == 'success' }}", 'security reports red, not skipped, when security-assurance fails');
+  assert.equal(wf.jobs.build.if, "${{ !cancelled() && needs.config.result == 'success' }}", 'build reports red, not skipped, when compile fails');
+  assert.equal(wf.jobs.build.steps[0].env.RESULT, '${{ needs.compile.result }}');
+  assert.match(wf.jobs.build.steps[0].run, /if \[ "\$RESULT" != success \]; then/);
   assert.equal(wf.jobs.security.steps[0].env.DECISION, '${{ needs.security-assurance.outputs.decision }}');
   assert.match(wf.jobs.security.steps[0].run, /if \[ "\$DECISION" != PASS \]; then/);
 });
@@ -272,27 +274,69 @@ test('shadow and promote run the request actions at the workflow_depot commit pi
   assert.equal(wf.jobs.promote.steps[2].env.INPUT_ARTIFACT_DIGEST, '${{ needs.build.outputs.artifact_digest }}');
 });
 
-test('build outputs artifact_digest, uploads it and attests it', () => {
+test('compile builds and uploads without privileges; build attests that exact artifact and runs no repository code', () => {
+  const compile = wf.jobs.compile;
   const build = wf.jobs.build;
-  assert.equal(build.outputs.artifact_digest, '${{ steps.package.outputs.artifact_digest }}');
-  assert.equal(wf.on.workflow_call.outputs.artifact_digest.value, '${{ jobs.build.outputs.artifact_digest }}');
-  const attest = build.steps.find((s) => s.uses?.startsWith('actions/attest-build-provenance@'));
-  assert.equal(attest.with['subject-path'], '${{ steps.package.outputs.artifact_file }}');
-  assert.equal(attest.if, 'inputs.require-attestation');
-  const upload = build.steps.find((s) => s.uses?.startsWith('actions/upload-artifact@'));
+  assert.deepEqual(compile.permissions, { contents: 'read' }, 'no OIDC token while lifecycle and build scripts run');
+  assert.equal(compile.outputs.artifact_digest, '${{ steps.package.outputs.artifact_digest }}');
+  assert.equal(compile.outputs.artifact_name, '${{ steps.package.outputs.artifact_name }}');
+  const upload = compile.steps.find((s) => s.uses?.startsWith('actions/upload-artifact@') && s.with.name === 'pipeline-artifact');
   assert.equal(upload.with.path, '${{ steps.package.outputs.artifact_file }}');
-  assert.equal(build.steps.find((s) => s.id === 'package').env.ARTIFACT_PATH, '${{ needs.config.outputs.output_directory }}');
+  assert.equal(upload.with['if-no-files-found'], 'error');
+  assert.equal(compile.steps.find((s) => s.id === 'package').env.ARTIFACT_PATH, '${{ needs.config.outputs.output_directory }}');
+  const sbom = compile.steps.find((s) => s.name?.startsWith('SBOM'));
+  assert.match(sbom.run, /cyclonedx-json=/);
+  assert.match(sbom.run, /spdx-json=/);
+  for (const s of compile.steps) if (s.uses?.startsWith('actions/setup-node@')) assert.equal(s.with['package-manager-cache'], 'false');
+  assert.ok(!compile.steps.some((s) => s.with?.cache), 'no dependency cache in the attested build');
+  assert.ok(!compile.steps.some((s) => s.uses?.startsWith('actions/attest-build-provenance@')));
+
+  assert.deepEqual(build.permissions, { contents: 'read', 'id-token': 'write', attestations: 'write' });
+  assert.equal(build.defaults, undefined);
+  for (const s of build.steps) {
+    assert.ok(!s.uses?.startsWith('actions/checkout@') && !s.uses?.startsWith('actions/setup-node@') && s.uses !== INSTALL_TOOL, `build runs no repository code: ${s.uses}`);
+    assert.ok(!/\bnpm\b|\bnode\b/.test(s.run ?? ''), 'build runs no npm or node');
+  }
+  assert.equal(build.outputs.artifact_digest, '${{ steps.fetch.outputs.artifact_digest }}');
+  assert.equal(wf.on.workflow_call.outputs.artifact_digest.value, '${{ jobs.build.outputs.artifact_digest }}');
+  const download = build.steps.find((s) => s.uses?.startsWith('actions/download-artifact@'));
+  assert.equal(download.with.name, 'pipeline-artifact');
+  const fetch = build.steps.find((s) => s.id === 'fetch');
+  assert.deepEqual(fetch.env, { ARTIFACT_NAME: '${{ needs.compile.outputs.artifact_name }}', ARTIFACT_DIGEST: '${{ needs.compile.outputs.artifact_digest }}', DIR: '${{ runner.temp }}/pipeline-artifact' });
+  assert.match(fetch.run, /\[ "\$actual" = "\$ARTIFACT_DIGEST" \]/, 'the attested bytes are the bytes compile digested');
+  const attest = build.steps.find((s) => s.uses?.startsWith('actions/attest-build-provenance@'));
+  assert.equal(attest.with['subject-path'], '${{ steps.fetch.outputs.artifact_file }}');
+  assert.equal(attest.if, 'inputs.require-attestation');
   const verify = build.steps.find((s) => s.name?.startsWith('Verify the attestation'));
   assert.equal(verify.if, 'inputs.require-attestation');
   assert.match(verify.run, /gh attestation verify "\$ARTIFACT_FILE" --repo "\$GITHUB_REPOSITORY"/);
   assert.match(verify.run, /--cert-identity "https:\/\/github\.com\/susanbeasles\/workflow_depot\/\.github\/workflows\/pipeline\.yml@\$DEPOT_REF"/);
-  assert.ok(build.steps.indexOf(verify) > build.steps.indexOf(attest), 'verify after attest');
-  const sbom = build.steps.find((s) => s.name?.startsWith('SBOM'));
-  assert.match(sbom.run, /cyclonedx-json=/);
-  assert.match(sbom.run, /spdx-json=/);
-  assert.equal(upload.with['if-no-files-found'], 'error');
-  for (const s of build.steps) if (s.uses?.startsWith('actions/setup-node@')) assert.equal(s.with['package-manager-cache'], 'false');
-  assert.ok(!build.steps.some((s) => s.with?.cache), 'no dependency cache in the attested build');
+  const order = (s) => build.steps.indexOf(s);
+  assert.ok(order(fetch) > order(download) && order(attest) > order(fetch) && order(verify) > order(attest), 'download, check, attest, verify');
+});
+
+test('every job that uses the working directory checks it right after checkout, before any step uses it', () => {
+  for (const job of ['lint-test', 'quality', 'security', 'compile']) {
+    const steps = wf.jobs[job].steps;
+    const checkout = steps.findIndex((s) => s.uses?.startsWith('actions/checkout@') && s.with?.repository === undefined);
+    const check = steps[checkout + 1];
+    assert.equal(check.run, readFileSync(path.join(SCRIPTS, 'workdir-check.cjs'), 'utf8'), `${job}: workdir check follows checkout`);
+    assert.equal(check['working-directory'], '.');
+    assert.equal(check.env.WORKING_DIRECTORY, '${{ needs.config.outputs.working_directory }}');
+    const firstUse = steps.findIndex((s, i) => i > checkout + 1 && (s['working-directory'] === '${{ needs.config.outputs.working_directory }}' || (wf.jobs[job].defaults && s['working-directory'] === undefined && (s.run !== undefined))));
+    assert.ok(firstUse === -1 || firstUse > checkout + 1, `${job}: nothing uses the directory before the check`);
+  }
+});
+
+test('stage 7 fails closed: no dispatch PAT, no request-deployment.yml, red with the reason when deploy targets exist', () => {
+  const deploy = wf.jobs.deploy;
+  assert.equal(deploy.uses, undefined);
+  assert.equal(deploy.secrets, undefined);
+  assert.deepEqual(deploy.permissions, {});
+  assert.equal(deploy.steps.length, 1);
+  assert.match(deploy.steps[0].run, /PAT dispatch \(request-deployment\.yml\) is forbidden/);
+  assert.match(deploy.steps[0].run, /exit 1\n$/);
+  assert.ok(!raw.includes('request-deployment.yml\n') && !/uses: \.\/\.github\/workflows\/request-deployment/.test(raw));
 });
 
 test('quality and security run their tools from pinned, checksum-verified downloads', () => {
@@ -336,7 +380,7 @@ test('caller template: triggers, permissions {}, job id pipeline, depot_ref equa
   const pinned = /^susanbeasles\/workflow_depot\/\.github\/workflows\/pipeline\.yml@([0-9a-f]{40})$/.exec(job.uses);
   assert.ok(pinned, job.uses);
   assert.deepEqual(job.with, { depot_ref: pinned[1] });
-  assert.deepEqual(job.secrets, { RELEASE_DISPATCH_TOKEN: '${{ secrets.RELEASE_DISPATCH_TOKEN }}' });
+  assert.equal(job.secrets, undefined, 'the caller passes no secret');
   // The union of what the jobs inside declare; each job keeps only its own grant.
   assert.deepEqual(job.permissions, { contents: 'write', 'id-token': 'write', attestations: 'write', 'security-events': 'write' });
   const union = {};

@@ -60,7 +60,7 @@ assert not re.search(r"secrets:\s*inherit", text), "secrets: inherit is forbidde
 call = wf["on"]["workflow_call"]
 assert call["inputs"]["depot_ref"]["required"] == "true"
 assert set(call["inputs"]) == {"depot_ref", "require-attestation"}
-assert set(call.get("secrets", {})) == {"RELEASE_DISPATCH_TOKEN"}
+assert "secrets" not in call, "stage 7 takes no dispatch PAT (spec 5.2/5.4)"
 
 # Stage order. ADR-0002 check names are the four evidence jobs plus shadow and promote.
 expected_needs = {
@@ -69,7 +69,8 @@ expected_needs = {
     "quality": ["config"],
     "security-assurance": ["config"],
     "security": ["config", "security-assurance"],
-    "build": ["config", "lint-test", "quality", "security"],
+    "compile": ["config", "lint-test", "quality", "security"],
+    "build": ["config", "compile"],
     "shadow": ["build"],
     "promote": ["build"],
     "release": ["config", "build"],
@@ -93,11 +94,13 @@ for name in ["lint-test", "quality", "security", "build", "shadow", "promote"]:
     )
 
 # Conditions.
-for name in ["config", "lint-test", "quality", "security-assurance", "build"]:
+for name in ["config", "lint-test", "quality", "security-assurance", "compile"]:
     assert "if" not in jobs[name], f"{name} runs on every call"
-assert (
-    jobs["security"]["if"] == "${{ !cancelled() && needs.config.result == 'success' }}"
-)
+for name in ["security", "build"]:
+    assert (
+        jobs[name]["if"] == "${{ !cancelled() && needs.config.result == 'success' }}"
+    ), f"{name} reports red, not skipped"
+assert jobs["build"]["steps"][0]["env"]["RESULT"] == "${{ needs.compile.result }}"
 shadow_if = " ".join(jobs["shadow"]["if"].split())
 for clause in [
     "github.event_name == 'pull_request'",
@@ -118,7 +121,7 @@ assert jobs["deploy"]["if"] == (
 )
 assert "needs.config.outputs.ecosystem == 'terraform'" in jobs["infra-apply"]["if"]
 assert "refs/heads/main" in jobs["infra-apply"]["if"]
-for name in ["shadow", "promote", "release", "deploy", "infra-apply", "build"]:
+for name in ["shadow", "promote", "release", "deploy", "infra-apply", "compile"]:
     assert not STATUS.search(jobs[name].get("if", "")), (
         f"{name}: a status function would let it run after a failed stage"
     )
@@ -134,11 +137,12 @@ expected_permissions = {
         "id-token": "write",
     },
     "security": {"contents": "read"},
+    "compile": {"contents": "read"},
     "build": {"contents": "read", "id-token": "write", "attestations": "write"},
     "shadow": {"id-token": "write"},
     "promote": {"id-token": "write"},
     "release": {"contents": "write", "id-token": "write", "attestations": "write"},
-    "deploy": {"contents": "read"},
+    "deploy": {},
     "infra-apply": {},
 }
 for name, job in jobs.items():
@@ -150,7 +154,6 @@ for name, job in jobs.items():
 nested = {
     "security-assurance": "security-assurance.yml",
     "release": "release.yml",
-    "deploy": "request-deployment.yml",
 }
 for name, job in jobs.items():
     if "uses" not in job:
@@ -178,12 +181,21 @@ for name, job in jobs.items():
         assert job["with"]["depot_ref"] == "${{ inputs.depot_ref }}", (
             f"{name}: depot_ref passthrough"
         )
-assert jobs["deploy"].get("secrets") == {
-    "RELEASE_DISPATCH_TOKEN": "${{ secrets.RELEASE_DISPATCH_TOKEN }}"
-}
-for name in ["security-assurance", "release"]:
+for name in ["security-assurance", "release", "deploy"]:
     assert "secrets" not in jobs[name], f"{name}: no secrets"
-assert text.count("secrets.") == 1, "the one named secret is used only by deploy"
+assert "secrets." not in text, "the pipeline reads no secret"
+assert "uses" not in jobs["deploy"] and "forbidden" in jobs["deploy"]["steps"][0]["run"], (
+    "stage 7 fails closed until the authorizer OIDC request exists"
+)
+
+# Stage 4: repository code runs only in compile, which holds no OIDC token; build only attests its upload.
+assert jobs["compile"]["permissions"] == {"contents": "read"}
+for step in jobs["build"]["steps"]:
+    uses = step.get("uses", "")
+    assert not uses.startswith(("actions/checkout@", "actions/setup-node@")) and uses != INSTALL_TOOL, (
+        f"build runs no repository code: {uses}"
+    )
+    assert not re.search(r"\b(npm|node)\b", step.get("run", "")), "build runs no npm or node"
 
 # Steps: pinned actions, no credential persistence, no expressions in shell, no eval.
 for name, job in jobs.items():
@@ -225,7 +237,7 @@ assert job["permissions"] == union, (
 )
 
 print(
-    "Verified pipeline.yml: config -> lint-test, quality, security-assurance -> security -> build -> "
+    "Verified pipeline.yml: config -> lint-test, quality, security-assurance -> security -> compile -> build -> "
     "shadow | promote | release -> deploy | infra-apply; conditions, least-privilege permissions, "
-    "pinned uses, same-commit nested workflows, one named secret."
+    "pinned uses, same-commit nested workflows, no secrets."
 )

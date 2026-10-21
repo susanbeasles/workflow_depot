@@ -17,6 +17,7 @@ const commitlint = require('../scripts/commitlint.cjs');
 const lockfile = require('../scripts/lockfile-check.cjs');
 const pkg = require('../scripts/package.cjs');
 const coverage = require('../scripts/coverage-check.cjs');
+const workdir = require('../scripts/workdir-check.cjs');
 
 const SHA_A = 'a'.repeat(40);
 const scratch = () => mkdtempSync(path.join(tmpdir(), 'pipeline-test-'));
@@ -386,13 +387,59 @@ test('coverage-check: refuses missing, empty, malformed, symlinked and climbing 
   assert.throws(() => coverage.check(bad, 'coverage/coverage-summary.json', '80'), /not JSON/);
   const linked = summaryDir(LINES(100, 100, 100));
   symlinkSync(path.join(linked, 'coverage', 'coverage-summary.json'), path.join(linked, 'coverage', 'link.json'));
-  assert.throws(() => coverage.check(linked, 'coverage/link.json', '80'), /regular file/);
+  assert.throws(() => coverage.check(linked, 'coverage/link.json', '80'), /coverage\/link\.json is a symlink/);
   for (const rel of ['../coverage-summary.json', '/etc/passwd', './coverage/coverage-summary.json', '']) {
     assert.throws(() => coverage.check(linked, rel, '80'), /normalized relative path/, rel);
   }
   for (const min of ['0', '101', '80.5', '', 'eighty', undefined]) {
     assert.throws(() => coverage.check(linked, 'coverage/coverage-summary.json', min), /COVERAGE_MIN/, String(min));
   }
+});
+
+test('coverage-check: a symlinked parent directory is refused before the report is read', () => {
+  const outside = summaryDir(LINES(100, 100, 100));
+  const ws = scratch();
+  symlinkSync(path.join(outside, 'coverage'), path.join(ws, 'coverage'));
+  assert.throws(() => coverage.check(ws, 'coverage/coverage-summary.json', '80'), /coverage is a symlink/);
+  mkdirSync(path.join(ws, 'real'));
+  writeFileSync(path.join(ws, 'real', 'file'), 'x');
+  assert.throws(() => coverage.check(ws, 'real/file/summary.json', '80'), /not a directory|does not exist/);
+});
+
+test('coverage-check: impossible or inconsistent numbers cannot pass the gate', () => {
+  const at = (lines) => () => coverage.check(summaryDir({ lines }), 'coverage/coverage-summary.json', '80');
+  assert.throws(at({ total: 100, covered: 50, pct: 101 }), /from 0 to 100/);
+  assert.throws(at({ total: 100, covered: 50, pct: -1 }), /from 0 to 100/);
+  assert.throws(at({ total: 100, covered: 101, pct: 100 }), /covered must be an integer/);
+  assert.throws(at({ total: 100, covered: '80', pct: 80 }), /covered must be an integer/);
+  assert.throws(at({ total: 100, covered: 10, pct: 95 }), /disagrees with covered\/total 10\/100/);
+  // Istanbul floors to two decimals: 2/3 is reported as 66.66.
+  assert.equal(coverage.check(summaryDir({ lines: { total: 3, covered: 2, pct: 66.66 } }), 'coverage/coverage-summary.json', '66').ok, true);
+  assert.equal(coverage.check(summaryDir({ lines: { total: 3, covered: 2, pct: 66.66 } }), 'coverage/coverage-summary.json', '67').ok, false);
+});
+
+// ---- workdir-check.cjs ---------------------------------------------------------------------------
+
+test('workdir-check: accepts . and real directories inside the checkout', () => {
+  const ws = scratch();
+  mkdirSync(path.join(ws, 'apps', 'web'), { recursive: true });
+  assert.ok(workdir.check(ws, '.'));
+  assert.ok(workdir.check(ws, 'apps/web').endsWith(path.join('apps', 'web')));
+});
+
+test('workdir-check: refuses symlinked components, files, missing paths and unnormalized spellings', () => {
+  const ws = scratch();
+  const outside = scratch();
+  mkdirSync(path.join(outside, 'web'));
+  mkdirSync(path.join(ws, 'apps'));
+  symlinkSync(outside, path.join(ws, 'linked'));
+  symlinkSync(path.join(outside, 'web'), path.join(ws, 'apps', 'web'));
+  writeFileSync(path.join(ws, 'file'), 'x');
+  assert.throws(() => workdir.check(ws, 'linked/web'), /linked is a symlink/);
+  assert.throws(() => workdir.check(ws, 'apps/web'), /apps\/web is a symlink/);
+  assert.throws(() => workdir.check(ws, 'file'), /not a directory/);
+  assert.throws(() => workdir.check(ws, 'nope'), /does not exist/);
+  for (const bad of ['../x', '/etc', './apps', 'apps/../..', '', undefined]) assert.throws(() => workdir.check(ws, bad), /normalized relative path/, String(bad));
 });
 
 // ---- embed.mjs ----------------------------------------------------------------------------------
