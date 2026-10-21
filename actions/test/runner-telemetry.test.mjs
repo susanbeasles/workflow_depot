@@ -162,7 +162,7 @@ test('an asynchronous spawn failure never crashes the telemetry action process',
   const { env, files } = actionEnv();
   const module = new URL('../runner-telemetry/start.mjs', import.meta.url).href;
   const result = spawnSync(process.execPath, ['--input-type=module', '-e',
-    `import { start } from ${JSON.stringify(module)}; start(${JSON.stringify(env)}, { execPath: ${JSON.stringify(join(files.temp, 'missing-node'))} });`],
+    `import { start } from ${JSON.stringify(module)}; start(${JSON.stringify(env)}, { platform: 'linux', execPath: ${JSON.stringify(join(files.temp, 'missing-node'))} });`],
   { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /sampler not started/);
