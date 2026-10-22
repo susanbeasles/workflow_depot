@@ -10,9 +10,11 @@ runs:
   using: composite
   steps:
     - shell: bash
+      env:
+        INPUT_RESULTS_DIR: ${{ inputs.results_dir }}
       run: |
         # Merge SAST-CODEQL-<lang> into SAST-CODEQL (worst status wins; NOT_RUN if languages were detected but no results exist).
-        python3 - "${{ inputs.results_dir }}" <<'PY'
+        python3 - "$INPUT_RESULTS_DIR" <<'PY'
         import glob,json,os,sys
         rd=sys.argv[1]; order=["TOOL_FAILURE","POLICY_UNAVAILABLE","FAIL","INCONCLUSIVE","NOT_RUN","PASS","NOT_APPLICABLE"]
         members=[json.load(open(p)) for p in glob.glob(os.path.join(rd,"SAST-CODEQL-*.json"))]
@@ -38,6 +40,14 @@ runs:
         PY
     - id: gate
       shell: bash
+      env:
+        INPUT_PROFILE: ${{ inputs.profile }}
+        INPUT_RESULTS_DIR: ${{ inputs.results_dir }}
+        INPUT_STAGE: ${{ inputs.stage }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
-        python3 "${{ github.action_path }}/../../scripts/gate.py" --policy "${{ github.action_path }}/../../../policy/release-policy.yml" \
-          --results "${{ inputs.results_dir }}" --profile "${{ inputs.profile }}" --stage "${{ inputs.stage }}" --out "${{ inputs.results_dir }}/gate-$(echo '${{ inputs.stage }}' | tr ',' '-')"
+        set -euo pipefail
+        case "$INPUT_PROFILE" in ci-baseline|strict) ;; *) echo "::error::invalid profile"; exit 2;; esac
+        [[ "$INPUT_STAGE" == all || "$INPUT_STAGE" =~ ^[0245](,[0245])*$ ]] || { echo "::error::invalid stage"; exit 2; }
+        python3 "$ACTION_PATH/../../scripts/gate.py" --policy "$ACTION_PATH/../../../policy/release-policy.yml" \
+          --results "$INPUT_RESULTS_DIR" --profile "$INPUT_PROFILE" --stage "$INPUT_STAGE" --out "$INPUT_RESULTS_DIR/gate-${INPUT_STAGE//,/-}"

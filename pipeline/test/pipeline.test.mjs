@@ -34,7 +34,8 @@ const ADR = {
   'lint-test': [],
   quality: [],
   security: [],
-  build: ['lint-test', 'quality', 'security'],
+  'build-candidate': ['lint-test', 'quality', 'security'],
+  build: ['build-candidate'],
   shadow: ['build'],
   promote: ['build'],
 };
@@ -76,7 +77,8 @@ test('every job: ubuntu-24.04, timeout-minutes, explicit minimal permissions', (
     'lint-test': { contents: 'read' },
     quality: { contents: 'read' },
     security: { contents: 'read' },
-    build: { contents: 'read', 'id-token': 'write', attestations: 'write' },
+    'build-candidate': { contents: 'read' },
+    build: { contents: 'read' },
     shadow: { 'id-token': 'write' },
     promote: { 'id-token': 'write' },
   };
@@ -95,7 +97,7 @@ test('every uses: is pinned to a full 40-hex SHA with a version comment', () => 
 });
 
 test('only the allowed actions are used', () => {
-  const ok = new Set(['actions/checkout', 'actions/setup-node', 'actions/upload-artifact', 'actions/attest-build-provenance']);
+  const ok = new Set(['actions/checkout', 'actions/setup-node', 'actions/upload-artifact', 'actions/download-artifact']);
   for (const { job, step } of allSteps()) if (step.uses !== undefined) assert.ok(ok.has(step.uses.split('@')[0]), `${job}: ${step.uses}`);
 });
 
@@ -128,8 +130,7 @@ test('caller commands reach the shell only through env and are run, not interpol
   assert.equal(inputs.test.default, 'npm test');
   assert.equal(inputs.build.default, 'npm run build --if-present');
   assert.equal(inputs['artifact-path'].default, '');
-  assert.equal(inputs['require-attestation'].type, 'boolean');
-  assert.equal(inputs['require-attestation'].default, 'true');
+  assert.equal(inputs['require-attestation'], undefined, 'no GitHub attestations');
 });
 
 test('shadow runs only for pull_request into main; promote only for push to shadow/pr-*', () => {
@@ -158,18 +159,18 @@ test('shadow and promote run the request actions at the workflow_depot commit pi
   assert.equal(wf.jobs.promote.steps[2].env.INPUT_ARTIFACT_DIGEST, '${{ needs.build.outputs.artifact_digest }}');
 });
 
-test('build outputs artifact_digest, uploads it and attests it', () => {
+test('build outputs an independently computed artifact_digest and creates no GitHub attestation', () => {
   const build = wf.jobs.build;
-  assert.equal(build.outputs.artifact_digest, '${{ steps.package.outputs.artifact_digest }}');
+  assert.equal(build.outputs.artifact_digest, '${{ steps.digest.outputs.artifact_digest }}');
   assert.equal(wf.on.workflow_call.outputs.artifact_digest.value, '${{ jobs.build.outputs.artifact_digest }}');
-  const attest = build.steps.find((s) => s.uses?.startsWith('actions/attest-build-provenance@'));
-  assert.equal(attest.with['subject-path'], '${{ steps.package.outputs.artifact_file }}');
-  assert.equal(attest.if, 'inputs.require-attestation');
-  const upload = build.steps.find((s) => s.uses?.startsWith('actions/upload-artifact@'));
+  assert.ok(!build.steps.some((s) => s.uses?.startsWith('actions/attest')), 'no GitHub attestation step');
+  assert.deepEqual(build.permissions, { contents: 'read' });
+  const candidate = wf.jobs['build-candidate'];
+  const upload = candidate.steps.find((s) => s.uses?.startsWith('actions/upload-artifact@'));
   assert.equal(upload.with.path, '${{ steps.package.outputs.artifact_file }}');
   assert.equal(upload.with['if-no-files-found'], 'error');
-  for (const s of build.steps) if (s.uses?.startsWith('actions/setup-node@')) assert.equal(s.with['package-manager-cache'], 'false');
-  assert.ok(!build.steps.some((s) => s.with?.cache), 'no dependency cache in the attested build');
+  for (const s of candidate.steps) if (s.uses?.startsWith('actions/setup-node@')) assert.equal(s.with['package-manager-cache'], 'false');
+  assert.ok(!build.steps.some((s) => s.with?.cache), 'no dependency cache in the released build');
 });
 
 test('quality and security run their tools from pinned, checksum-verified downloads', () => {
@@ -209,7 +210,7 @@ test('caller template: triggers, permissions {}, job id pipeline at a pinned SHA
   const job = caller.jobs.pipeline;
   assert.equal(job.name, undefined, 'a name on the calling job would change every check name');
   assert.match(job.uses, /^susanbeasles\/workflow_depot\/\.github\/workflows\/pipeline\.yml@[0-9a-f]{40}$/);
-  assert.deepEqual(job.permissions, { contents: 'read', 'id-token': 'write', attestations: 'write' });
+  assert.deepEqual(job.permissions, { contents: 'read', 'id-token': 'write' });
 });
 
 test('check names the pipeline implies equal the names the authorizer policy requires', (t) => {
@@ -226,7 +227,10 @@ test('check names the pipeline implies equal the names the authorizer policy req
   const checkRequired = (where, got, job) => {
     for (const check of got) assert.ok(implied.has(check), `${where}: ${check} is not a pipeline check`);
     assert.ok(!got.includes(name(job)), `${where} requires its own job`);
-    assert.deepEqual([...got].sort(), [...transitive(job)].map(name).sort(), where);
+    // ADR-0002 exposes four authorizer checks. build-candidate is a private
+    // prerequisite of build, whose unconditional dependency is asserted below.
+    // Do not require a live-policy change merely for this isolation helper.
+    assert.deepEqual([...got].sort(), [...transitive(job)].filter(dep => dep !== 'build-candidate').map(name).sort(), where);
   };
   if (policy.required_jobs !== undefined) {
     // authorizer-policy with one job contract: pipeline_workflow + required_jobs.
@@ -246,5 +250,15 @@ test('check names the pipeline implies equal the names the authorizer policy req
     const rules = (policy.actions?.[action] ?? []).filter((rule) => rule.workflow === 'pipeline');
     assert.ok(rules.length > 0, `policy has no ${action} rule for the pipeline`);
     for (const rule of rules) checkRequired(`${action} ${rule.repo} ${fields[action]}`, rule[fields[action]] ?? [], job);
+  }
+});
+
+
+test('internal candidate cannot bypass the four public promotion checks',()=>{
+  assert.deepEqual(needsOf('build'),['build-candidate']);
+  assert.deepEqual([...needsOf('build-candidate')].sort(),['lint-test','quality','security']);
+  for(const job of ['build-candidate','build']) {
+    assert.equal(wf.jobs[job].if,undefined,'default success dependency gating is mandatory');
+    assert.equal(wf.jobs[job]['continue-on-error'],undefined,'failed candidate/build may not be green');
   }
 });

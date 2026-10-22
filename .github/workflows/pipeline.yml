@@ -1,0 +1,809 @@
+# The reusable CI pipeline: infra-root ADR-0002 section 1. Staged at pipeline/pipeline.yml in
+# susanbeasles/workflow_depot; the owner installs it byte for byte at .github/workflows/pipeline.yml
+# (pipeline/README.md). Callers use pipeline/caller.yml, whose calling job id is `pipeline`, so the
+# check names are `pipeline / <job>`. The authorizer requires those names: do not rename jobs or add `name:`.
+#
+# Commands come from the caller's workflow file (inputs), never from pull request content. They reach the
+# shell through `env:` only: no `${{ }}` appears inside any `run:` block (pipeline/test enforces it).
+# Steps marked `# embedded:` are pipeline/scripts/*.cjs copied in by `node pipeline/embed.mjs`.
+name: pipeline
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: Node.js version for install, lint, test and build.
+        type: string
+        default: '24'
+      working-directory:
+        description: Directory holding package.json, relative to the repository root.
+        type: string
+        default: .
+      install:
+        description: Install command. Empty skips it. Lifecycle scripts stay off unless you change this.
+        type: string
+        default: npm ci --ignore-scripts
+      lint:
+        description: Lint command. Empty skips it.
+        type: string
+        default: npm run lint --if-present
+      typecheck:
+        description: Type-check command. Empty skips it.
+        type: string
+        default: npm run typecheck --if-present
+      test:
+        description: Test command. Empty skips it, with a warning.
+        type: string
+        default: npm test
+      build:
+        description: Build command, run before packaging. Empty skips it.
+        type: string
+        default: npm run build --if-present
+      artifact-path:
+        description: File or directory (relative to working-directory) to package. Empty packages `npm pack` output.
+        type: string
+        default: ''
+    outputs:
+      artifact_digest:
+        description: sha256:<hex> of the packaged artifact.
+        value: ${{ jobs.build.outputs.artifact_digest }}
+      candidate_sha:
+        description: pull_request runs, the shadow candidate the pipeline runs on next.
+        value: ${{ jobs.shadow.outputs.candidate_sha }}
+      promotion_outcome:
+        description: shadow/pr-* runs, `promoted` or `stale_base`.
+        value: ${{ jobs.promote.outputs.outcome }}
+      main_sha:
+        description: shadow/pr-* runs, main after promotion.
+        value: ${{ jobs.promote.outputs.main_sha }}
+      tag:
+        description: shadow/pr-* runs, the provenance tag.
+        value: ${{ jobs.promote.outputs.tag }}
+
+permissions: {}
+
+jobs:
+  lint-test:
+    name: lint-test # the check name is `pipeline / lint-test`; the authorizer requires it exactly
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      # Telemetry hook: actions/runner-telemetry (built separately) goes first in each job once reviewed and pinned.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          package-manager-cache: false
+          # Cache npm's tarball store only when there is a lockfile; `npm ci` re-verifies every integrity hash.
+          cache: ${{ hashFiles(format('{0}/package-lock.json', inputs.working-directory)) != '' && 'npm' || '' }}
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+      - name: Install
+        env:
+          CMD: ${{ inputs.install }}
+        run: |
+          if [ -z "${CMD//[[:space:]]/}" ]; then echo "install: skipped (empty)"; exit 0; fi
+          echo "+ $CMD"
+          eval "$CMD"
+      - name: Lint
+        env:
+          CMD: ${{ inputs.lint }}
+        run: |
+          if [ -z "${CMD//[[:space:]]/}" ]; then echo "lint: skipped (empty)"; exit 0; fi
+          echo "+ $CMD"
+          eval "$CMD"
+      - name: Typecheck
+        env:
+          CMD: ${{ inputs.typecheck }}
+        run: |
+          if [ -z "${CMD//[[:space:]]/}" ]; then echo "typecheck: skipped (empty)"; exit 0; fi
+          echo "+ $CMD"
+          eval "$CMD"
+      - name: Test
+        env:
+          CMD: ${{ inputs.test }}
+        run: |
+          if [ -z "${CMD//[[:space:]]/}" ]; then echo "::warning title=test::the test input is empty; nothing was tested"; exit 0; fi
+          echo "+ $CMD"
+          eval "$CMD"
+
+  quality:
+    name: quality # the check name is `pipeline / quality`; the authorizer requires it exactly
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install actionlint and zizmor (pinned, checksum-verified)
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          # sha256 of the actionlint binary inside the release tarball (the tarball itself is checked against
+          # the project's checksums file first).
+          ACTIONLINT_BIN_SHA256: c872d6db8c6bf83a8eaa704fc93999f027d55dffbc63b8a6abdccb47df5f4cd4
+          ZIZMOR_VERSION: 1.30.1
+          # sha256 of zizmor-x86_64-unknown-linux-gnu.tar.gz, from security-assurance/policy/tool-registry.yml.
+          ZIZMOR_SHA256: e65324f4430c2717591937edcec90ccbefaf14c174f8ec9415e03ca875b46e1a
+        run: |
+          set -euo pipefail
+          bin="$RUNNER_TEMP/pipeline-bin"; work="$RUNNER_TEMP/pipeline-dl"; mkdir -p "$bin" "$work"; cd "$work"
+          fetch() { curl -fsSL --proto '=https' --tlsv1.2 --retry 3 "$1" -o "$2"; }
+          base="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          tgz="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          fetch "$base/$tgz" "$tgz"
+          fetch "$base/actionlint_${ACTIONLINT_VERSION}_checksums.txt" actionlint.sums
+          grep -E "^[0-9a-f]{64}  ${tgz}\$" actionlint.sums | sha256sum -c -
+          mkdir actionlint && tar -xzf "$tgz" -C actionlint actionlint
+          echo "${ACTIONLINT_BIN_SHA256}  actionlint/actionlint" | sha256sum -c -
+          install -m 0755 actionlint/actionlint "$bin/actionlint"
+          fetch "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz" zizmor.tgz
+          echo "${ZIZMOR_SHA256}  zizmor.tgz" | sha256sum -c -
+          mkdir zizmor && tar -xzf zizmor.tgz -C zizmor
+          install -m 0755 "$(find zizmor -type f -name zizmor | head -n 1)" "$bin/zizmor"
+          "$bin/actionlint" -version | head -n 1
+          "$bin/zizmor" --version
+      - name: actionlint
+        run: |
+          # An explicit empty config: the repository's own actionlint config cannot relax the check.
+          printf '{}\n' > "$RUNNER_TEMP/actionlint.yaml"
+          "$RUNNER_TEMP/pipeline-bin/actionlint" -config-file "$RUNNER_TEMP/actionlint.yaml"
+      - name: zizmor
+        run: |
+          # --no-config: a zizmor.yml in the repository cannot disable audits. Inline ignore comments still
+          # apply; they are visible in review. Medium and high findings fail the job.
+          "$RUNNER_TEMP/pipeline-bin/zizmor" --offline --no-config --no-progress --min-severity=medium --format=github .github/workflows
+      - name: Lockfile
+        working-directory: ${{ inputs.working-directory }}
+        shell: node {0}
+        # embedded: pipeline/scripts/lockfile-check.cjs
+        run: |
+          'use strict';
+          // pipeline/scripts/lockfile-check.cjs: the npm lockfile exists, matches package.json and pins every
+          // downloaded package by integrity. Embedded byte for byte in pipeline.yml (shell: node {0});
+          // pipeline/test checks that the two match. Runs in the caller's working directory. `npm ci` in
+          // lint-test and build is the full drift check; this fails fast, offline, with a clear reason.
+          const { existsSync, readFileSync } = require('node:fs');
+          const path = require('node:path');
+
+          const DEP_FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies'];
+
+          function sameMap(a = {}, b = {}) {
+            const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+            return [...keys].filter((key) => a[key] !== b[key]).sort();
+          }
+
+          /** Returns {errors, warnings, skipped, packages} for the npm project in `dir`. */
+          function check(dir) {
+            const result = { errors: [], warnings: [], skipped: false, packages: 0 };
+            if (!existsSync(path.join(dir, 'package.json'))) {
+              result.skipped = true;
+              return result;
+            }
+            const lockName = ['npm-shrinkwrap.json', 'package-lock.json'].find((name) => existsSync(path.join(dir, name)));
+            if (lockName === undefined) {
+              result.errors.push('package.json has no package-lock.json: run `npm install` and commit the lockfile');
+              return result;
+            }
+            let manifest;
+            let lock;
+            try {
+              manifest = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'));
+              lock = JSON.parse(readFileSync(path.join(dir, lockName), 'utf8'));
+            } catch (error) {
+              result.errors.push(`cannot parse package.json or ${lockName}: ${error.message}`);
+              return result;
+            }
+            if (!Number.isInteger(lock.lockfileVersion) || lock.lockfileVersion < 2 || typeof lock.packages !== 'object' || lock.packages === null) {
+              result.errors.push(`${lockName} is lockfileVersion ${lock.lockfileVersion}; regenerate it with npm 7 or later`);
+              return result;
+            }
+            const root = lock.packages[''] ?? {};
+            for (const field of DEP_FIELDS) {
+              const drift = sameMap(manifest[field], root[field]);
+              if (drift.length > 0) result.errors.push(`${lockName} is out of date with package.json ${field}: ${drift.join(', ')} (run \`npm install\`)`);
+            }
+            for (const [key, entry] of Object.entries(lock.packages)) {
+              if (key === '' || entry === null || typeof entry !== 'object' || entry.link === true || entry.inBundle === true) continue;
+              result.packages += 1;
+              const resolved = entry.resolved;
+              if (resolved === undefined) continue;
+              if (typeof resolved !== 'string' || !resolved.startsWith('https://')) {
+                result.errors.push(`${key} resolves to ${String(resolved).slice(0, 120)}: only https registry tarballs with an integrity hash are allowed`);
+                continue;
+              }
+              if (typeof entry.integrity !== 'string' || entry.integrity === '') {
+                result.errors.push(`${key} has no integrity hash`);
+              } else if (!/(^|\s)sha512-/.test(entry.integrity)) {
+                result.warnings.push(`${key} is pinned by ${entry.integrity.split('-')[0]} only (the registry publishes no sha512 for it)`);
+              }
+            }
+            return result;
+          }
+
+          /** Escape a value for a workflow command: lockfile text is PR content and must not inject commands. */
+          function escapeData(text) {
+            return String(text).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+          }
+
+          function main(dir = process.cwd(), log = console.log) {
+            const result = check(dir);
+            if (result.skipped) {
+              log('lockfile-check: no package.json here; not an npm project, nothing to check');
+              return true;
+            }
+            for (const warning of result.warnings) log(`::warning title=lockfile::${escapeData(warning)}`);
+            for (const error of result.errors) log(`::error title=lockfile::${escapeData(error)}`);
+            log(`lockfile-check: ${result.packages} package(s), ${result.errors.length} error(s), ${result.warnings.length} warning(s)`);
+            return result.errors.length === 0;
+          }
+
+          module.exports = { check, escapeData, main };
+
+          if (require.main === module) {
+            if (!main()) process.exitCode = 1;
+          }
+      - name: Commit messages
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        shell: node {0}
+        # embedded: pipeline/scripts/commitlint.cjs
+        run: |
+          'use strict';
+          // pipeline/scripts/commitlint.cjs: Conventional Commits check for the commits a run would land.
+          // Embedded byte for byte in pipeline.yml (shell: node {0}); pipeline/test checks that the two match.
+          // pull_request: every commit in BASE_SHA..HEAD_SHA. The promoter squashes them, so merge commits are
+          // skipped and git's autosquash and revert subjects are accepted. push (shadow candidate): HEAD_SHA only,
+          // strictly; that commit's message is what lands on main. No dependencies.
+          const { execFileSync } = require('node:child_process');
+
+          const TYPES = ['build', 'chore', 'ci', 'docs', 'feat', 'fix', 'perf', 'refactor', 'revert', 'style', 'test'];
+          const HEADER = /^([a-z]+)(\([a-z0-9][a-z0-9._/-]*\))?(!)?: (\S.*)$/;
+          const MAX_HEADER = 100;
+          const SQUASHED = /^(fixup|squash|amend)! |^Revert "/;
+          const SHA = /^[0-9a-f]{40}$/;
+
+          /** Problems with one commit message ([] when it conforms). `squashed` relaxes rules for commits the promoter squashes. */
+          function lintMessage(message, { squashed = false } = {}) {
+            const lines = String(message).replace(/\r\n/g, '\n').split('\n');
+            const header = lines[0];
+            if (squashed && SQUASHED.test(header)) return [];
+            const problems = [];
+            const match = HEADER.exec(header);
+            if (match === null) {
+              problems.push('header must be `type(scope)!: description`, e.g. `fix(api): reject empty body`');
+            } else if (!TYPES.includes(match[1])) {
+              problems.push(`type \`${match[1]}\` is not one of ${TYPES.join(', ')}`);
+            }
+            if (header.length > MAX_HEADER) problems.push(`header is ${header.length} characters; the limit is ${MAX_HEADER}`);
+            if (lines.length > 1 && lines[1].trim() !== '') problems.push('leave a blank line between the header and the body');
+            return problems;
+          }
+
+          /** Escape a value for a workflow command so commit text cannot inject commands or annotations. */
+          function escapeData(text) {
+            return String(text).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+          }
+
+          function readCommits(args, git) {
+            const out = git(['log', '--no-color', '--format=%H%x1f%P%x1f%B%x1e', ...args]);
+            return out.split('\x1e').map((entry) => entry.replace(/^\n/, '')).filter((entry) => entry !== '').map((entry) => {
+              const [sha, parents, body] = entry.split('\x1f');
+              return { sha, parents: parents.trim() === '' ? [] : parents.trim().split(' '), message: body.replace(/\n+$/, '') };
+            });
+          }
+
+          function defaultGit(args) {
+            return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+          }
+
+          function main(env = process.env, git = defaultGit, log = console.log) {
+            const event = env.EVENT_NAME;
+            const head = env.HEAD_SHA ?? '';
+            if (!SHA.test(head)) throw new Error('HEAD_SHA must be 40 lowercase hex');
+            let commits;
+            let squashed;
+            if (event === 'pull_request') {
+              const base = env.BASE_SHA ?? '';
+              if (!SHA.test(base)) throw new Error('BASE_SHA must be 40 lowercase hex on pull_request');
+              commits = readCommits([`${base}..${head}`], git);
+              squashed = true;
+            } else if (event === 'push') {
+              commits = readCommits(['-1', head], git);
+              squashed = false;
+            } else {
+              throw new Error(`commitlint runs on pull_request or push, not ${event}`);
+            }
+            let failed = 0;
+            let checked = 0;
+            for (const commit of commits) {
+              if (squashed && commit.parents.length > 1) continue;
+              checked += 1;
+              const problems = lintMessage(commit.message, { squashed });
+              if (problems.length === 0) continue;
+              failed += 1;
+              const header = commit.message.split('\n')[0];
+              log(`::error title=commit message ${commit.sha.slice(0, 12)}::${escapeData(`${problems.join('; ')} (header: ${header})`)}`);
+            }
+            log(`commitlint: ${checked} commit(s) checked, ${failed} failing`);
+            if (failed > 0) {
+              log(event === 'push'
+                ? 'The candidate commit message comes from the pull request title: retitle the PR as `type(scope): description`.'
+                : 'Reword with `git rebase -i` (reword) or a `fixup!` commit, then push.');
+            }
+            return failed === 0;
+          }
+
+          module.exports = { TYPES, MAX_HEADER, lintMessage, escapeData, readCommits, main };
+
+          if (require.main === module) {
+            try {
+              if (!main()) process.exitCode = 1;
+            } catch (error) {
+              console.log(`::error title=commitlint::${escapeData(error.message)}`);
+              process.exitCode = 1;
+            }
+          }
+
+  security:
+    name: security # the check name is `pipeline / security`; the authorizer requires it exactly
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install gitleaks (pinned, checksum-verified)
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          # sha256 of gitleaks_8.30.1_linux_x64.tar.gz, from security-assurance/policy/tool-registry.yml
+          # (cross-checked there against the project's checksums file).
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          bin="$RUNNER_TEMP/pipeline-bin"; work="$RUNNER_TEMP/pipeline-dl"; mkdir -p "$bin" "$work"; cd "$work"
+          curl -fsSL --proto '=https' --tlsv1.2 --retry 3 -o gitleaks.tgz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum -c -
+          mkdir gitleaks && tar -xzf gitleaks.tgz -C gitleaks gitleaks
+          install -m 0755 gitleaks/gitleaks "$bin/gitleaks"
+          "$bin/gitleaks" version
+      - name: gitleaks (checkout and commit range)
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          gl="$RUNNER_TEMP/pipeline-bin/gitleaks"
+          # The built-in rules, never the repository's .gitleaks.toml; findings are redacted in the log.
+          cfg="$RUNNER_TEMP/gitleaks.toml"; printf '[extend]\nuseDefault = true\n' > "$cfg"
+          ignore="$RUNNER_TEMP/gitleaks-ignore"; mkdir -p "$ignore"
+          if [ -f .gitleaksignore ]; then
+            echo "::warning title=gitleaks::.gitleaksignore suppresses $(grep -cvE '^[[:space:]]*(#|$)' .gitleaksignore || true) finding(s); review it in the diff"
+          fi
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error title=gitleaks::head sha is malformed"; exit 1; }
+          if [ "$EVENT_NAME" = pull_request ]; then
+            [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error title=gitleaks::base sha is malformed"; exit 1; }
+            range="$BASE_SHA..$HEAD_SHA"
+          else
+            range="$HEAD_SHA^..$HEAD_SHA"
+          fi
+          rc=0
+          "$gl" dir --no-banner --redact --config "$cfg" --gitleaks-ignore-path "$ignore" . || rc=1
+          "$gl" git --no-banner --redact --config "$cfg" --gitleaks-ignore-path "$ignore" --log-opts="$range" . || rc=1
+          exit "$rc"
+      - name: npm audit (production dependencies, high and critical)
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [ ! -f package.json ]; then echo "npm audit: no package.json here; skipped"; exit 0; fi
+          # The public registry and the threshold are fixed here: a repository .npmrc cannot redirect or relax them.
+          npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org/
+      # Hook: security-assurance (security-assurance/README.md) is not wired here. It is a separate reusable
+      # workflow of about 30 jobs that downloads scanners and vulnerability databases at run time, needs GitHub
+      # Advanced Security for CodeQL and takes far longer than this job. Call
+      # .github/workflows/security-assurance.yml from its own caller workflow; see pipeline/README.md.
+
+  build-candidate:
+    name: build-candidate
+    needs: [lint-test, quality, security]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          # No dependency cache in the job that produces the released artifact.
+          package-manager-cache: false
+      - name: Install
+        env:
+          CMD: ${{ inputs.install }}
+        run: |
+          if [ -z "${CMD//[[:space:]]/}" ]; then echo "install: skipped (empty)"; exit 0; fi
+          echo "+ $CMD"
+          eval "$CMD"
+      - name: Build
+        env:
+          CMD: ${{ inputs.build }}
+        run: |
+          if [ -z "${CMD//[[:space:]]/}" ]; then echo "build: skipped (empty)"; exit 0; fi
+          echo "+ $CMD"
+          eval "$CMD"
+      - name: Package
+        id: package
+        env:
+          ARTIFACT_PATH: ${{ inputs.artifact-path }}
+          OUT_DIR: ${{ runner.temp }}/pipeline-artifact
+        shell: node {0}
+        # embedded: pipeline/scripts/package.cjs
+        run: |
+          'use strict';
+          // pipeline/scripts/package.cjs: package the build output deterministically and digest it.
+          // Embedded byte for byte in pipeline.yml (shell: node {0}); pipeline/test checks that the two match.
+          // ARTIFACT_PATH empty: `npm pack --ignore-scripts` (npm normalizes order and mtimes). A file: used as is.
+          // A directory: GNU tar with sorted names, mtime 0, numeric owner 0 and normalized modes, then gzip with
+          // mtime 0. Writes artifact_file, artifact_name and artifact_digest (sha256:<hex>) to GITHUB_OUTPUT.
+          const { execFileSync } = require('node:child_process');
+          const { createHash } = require('node:crypto');
+          const { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } = require('node:fs');
+          const path = require('node:path');
+          const { gzipSync } = require('node:zlib');
+
+          const SAFE_NAME = /^[A-Za-z0-9._@+-]+$/;
+
+          class PackageError extends Error {}
+
+          function digestFile(file) {
+            return `sha256:${createHash('sha256').update(readFileSync(file)).digest('hex')}`;
+          }
+
+          function inside(parent, child) {
+            const rel = path.relative(parent, child);
+            return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+          }
+
+          function npmPack(cwd, outDir, run) {
+            if (!existsSync(path.join(cwd, 'package.json'))) throw new PackageError('no package.json: set the `artifact-path` input to the file or directory to package');
+            const out = run('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', outDir], { cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+            let filename;
+            try {
+              filename = JSON.parse(out)[0].filename;
+            } catch {
+              throw new PackageError('npm pack printed no JSON result');
+            }
+            if (typeof filename !== 'string') throw new PackageError('npm pack printed no filename');
+            // Scoped packages are named scope-name-version.tgz; anything else is refused rather than guessed.
+            const file = path.join(outDir, filename);
+            if (!SAFE_NAME.test(filename) || !existsSync(file)) throw new PackageError(`npm pack output ${filename} not found`);
+            return file;
+          }
+
+          function tarDirectory(dir, outDir, run) {
+            const name = path.basename(dir);
+            const tar = run('tar', [
+              '--sort=name', '--mtime=@0', '--owner=0', '--group=0', '--numeric-owner', '--mode=u+rwX,go+rX,go-w',
+              '--format=posix', '--pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime',
+              '-C', path.dirname(dir), '-cf', '-', '--', name,
+            ], { maxBuffer: 2 * 1024 * 1024 * 1024 });
+            const file = path.join(outDir, `${name}.tar.gz`);
+            writeFileSync(file, gzipSync(tar, { level: 9 }));
+            return file;
+          }
+
+          function packageArtifact({ artifactPath = '', cwd = process.cwd(), workspace = cwd, outDir }, run = execFileSync) {
+            if (!outDir) throw new PackageError('no output directory');
+            mkdirSync(outDir, { recursive: true });
+            let file;
+            if (artifactPath.trim() === '') {
+              file = npmPack(cwd, outDir, run);
+            } else {
+              const source = path.resolve(cwd, artifactPath);
+              if (!existsSync(source)) throw new PackageError(`artifact-path ${artifactPath} does not exist after the build`);
+              const real = realpathSync(source);
+              if (!inside(realpathSync(workspace), real)) throw new PackageError(`artifact-path ${artifactPath} is outside the workspace`);
+              const name = path.basename(real);
+              if (!SAFE_NAME.test(name)) throw new PackageError(`artifact name ${name} must match ${SAFE_NAME}`);
+              if (statSync(real).isDirectory()) {
+                file = tarDirectory(real, outDir, run);
+              } else {
+                file = path.join(outDir, name);
+                copyFileSync(real, file);
+              }
+            }
+            return { artifact_file: file, artifact_name: path.basename(file), artifact_digest: digestFile(file) };
+          }
+
+          function main(env = process.env, log = console.log) {
+            const result = packageArtifact({ artifactPath: env.ARTIFACT_PATH ?? '', cwd: process.cwd(), workspace: env.GITHUB_WORKSPACE || process.cwd(), outDir: env.OUT_DIR });
+            if (env.GITHUB_OUTPUT) for (const [key, value] of Object.entries(result)) appendFileSync(env.GITHUB_OUTPUT, `${key}=${value}\n`);
+            log(`packaged ${result.artifact_name} ${result.artifact_digest}`);
+            return result;
+          }
+
+          module.exports = { PackageError, digestFile, packageArtifact, main };
+
+          if (require.main === module) {
+            try {
+              main();
+            } catch (error) {
+              console.log(`::error title=package::${error instanceof PackageError ? error.message : `unexpected failure: ${error.message}`}`.replace(/[\r\n]+/g, ' '));
+              process.exitCode = 1;
+            }
+          }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: upload
+        with:
+          name: pipeline-artifact
+          path: ${{ steps.package.outputs.artifact_file }}
+          if-no-files-found: error
+          overwrite: false
+
+  build:
+    name: build # isolated re-hash of the uploaded artifact; no GitHub attestations (releases are cosign-signed)
+    needs: build-candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions: {contents: read}
+    outputs:
+      artifact_digest: ${{ steps.digest.outputs.artifact_digest }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build-candidate.outputs.artifact_id }}
+          path: ${{ runner.temp }}/signed-artifact
+          merge-multiple: true
+      - name: Hash the downloaded artifact without executing it
+        id: digest
+        shell: node {0}
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}/signed-artifact
+        # embedded: pipeline/scripts/hash-artifact.cjs
+        run: |
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const crypto = require('node:crypto');
+          const names = fs.readdirSync(process.env.ARTIFACT_DIR);
+          if (names.length !== 1) throw Error('Exactly one artifact file required');
+          const file = path.join(process.env.ARTIFACT_DIR, names[0]);
+          if (!/^[A-Za-z0-9._@+-]+$/.test(names[0]) || !fs.lstatSync(file).isFile()) throw Error('Regular artifact file required');
+          const hash = crypto.createHash('sha256');
+          const stream = fs.createReadStream(file);
+          stream.on('error', () => { process.exitCode = 1; });
+          stream.on('data', chunk => hash.update(chunk));
+          stream.on('end', () => fs.appendFileSync(process.env.GITHUB_OUTPUT, `artifact_digest=sha256:${hash.digest('hex')}\n`));
+
+  shadow:
+    name: shadow # the check name is `pipeline / shadow`; the authorizer requires it exactly
+    # Non-draft pull requests from this repository into main. Drafts run every stage but never ask for a
+    # candidate; marking the PR ready (caller: `ready_for_review`) starts the run that does.
+    if: >-
+      github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      id-token: write # OIDC token for the routing claim and for the authorizer; nothing else
+    outputs:
+      candidate_sha: ${{ steps.request.outputs.candidate_sha }}
+    steps:
+      - name: Find the workflow_depot commit this pipeline runs at
+        id: route
+        shell: node {0}
+        # embedded: pipeline/scripts/workflow-sha.cjs
+        run: |
+          'use strict';
+          // pipeline/scripts/workflow-sha.cjs: find the workflow_depot commit this reusable workflow runs at.
+          // Embedded byte for byte in pipeline.yml (shell: node {0}); pipeline/test checks that the two match.
+          // It reads this job's OIDC token, decodes the job_workflow_sha claim and writes `sha=<40 hex>` to
+          // GITHUB_OUTPUT. The signature is not checked: this only picks which commit to check out, and the
+          // authorizer verifies its own token. The token's audience is accepted by no service, so a leaked
+          // token is worthless. The token is never printed.
+          const { appendFileSync } = require('node:fs');
+
+          const AUDIENCE = 'workflow-depot-route';
+          const WORKFLOW = 'susanbeasles/workflow_depot/.github/workflows/pipeline.yml@';
+          const SHA = /^[0-9a-f]{40}$/;
+
+          class RouteError extends Error {}
+
+          function decodeClaims(jwt) {
+            const parts = typeof jwt === 'string' ? jwt.split('.') : [];
+            if (parts.length !== 3 || !/^[A-Za-z0-9_-]+$/.test(parts[1])) throw new RouteError('OIDC token is not a JWT');
+            let claims;
+            try {
+              claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+            } catch {
+              throw new RouteError('OIDC token payload is not JSON');
+            }
+            if (claims === null || typeof claims !== 'object' || Array.isArray(claims)) throw new RouteError('OIDC token payload is not an object');
+            return claims;
+          }
+
+          function workflowSha(claims) {
+            const ref = claims.job_workflow_ref;
+            if (typeof ref !== 'string' || !ref.startsWith(WORKFLOW) || ref.length === WORKFLOW.length) {
+              throw new RouteError('job_workflow_ref is not susanbeasles/workflow_depot pipeline.yml: run this job only inside the reusable pipeline');
+            }
+            const sha = claims.job_workflow_sha;
+            if (typeof sha !== 'string' || !SHA.test(sha)) throw new RouteError('job_workflow_sha is missing or not 40 lowercase hex');
+            return sha;
+          }
+
+          async function oidcToken(env, fetchImpl) {
+            const url = env.ACTIONS_ID_TOKEN_REQUEST_URL;
+            const bearer = env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+            if (!url || !bearer) throw new RouteError('no OIDC token available: the job needs `permissions: id-token: write`');
+            const target = new URL(url);
+            target.searchParams.set('audience', AUDIENCE);
+            const res = await fetchImpl(target, { headers: { authorization: `bearer ${bearer}` }, redirect: 'error', signal: AbortSignal.timeout(15000) });
+            if (res.status !== 200) throw new RouteError(`OIDC token request failed with ${res.status}`);
+            const text = await res.text();
+            if (text.length > 16384) throw new RouteError('OIDC token response too large');
+            let value;
+            try {
+              value = JSON.parse(text).value;
+            } catch {
+              throw new RouteError('OIDC token response is not JSON');
+            }
+            if (typeof value !== 'string') throw new RouteError('OIDC token response has no token');
+            return value;
+          }
+
+          async function main(env = process.env, fetchImpl = fetch, log = console.log) {
+            const sha = workflowSha(decodeClaims(await oidcToken(env, fetchImpl)));
+            if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, `sha=${sha}\n`);
+            log(`workflow_depot pipeline.yml runs at ${sha}`);
+            return sha;
+          }
+
+          module.exports = { AUDIENCE, WORKFLOW, RouteError, decodeClaims, workflowSha, oidcToken, main };
+
+          if (require.main === module) {
+            main().catch((error) => {
+              console.log(`::error title=workflow-sha::${error instanceof RouteError ? error.message : 'unexpected failure'}`);
+              process.exitCode = 1;
+            });
+          }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: susanbeasles/workflow_depot
+          ref: ${{ steps.route.outputs.sha }}
+          path: .workflow-depot
+          persist-credentials: false
+      - name: Ask the authorizer for the shadow candidate
+        id: request
+        env:
+          DEPOT_SHA: ${{ steps.route.outputs.sha }}
+        run: |
+          test "$(git -C .workflow-depot rev-parse HEAD)" = "$DEPOT_SHA"
+          node .workflow-depot/actions/request-shadow/main.mjs
+
+  promote:
+    name: promote # the check name is `pipeline / promote`; the authorizer requires it exactly
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/shadow/pr-')
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      id-token: write # OIDC token for the routing claim and for the authorizer; nothing else
+    outputs:
+      outcome: ${{ steps.request.outputs.outcome }}
+      main_sha: ${{ steps.request.outputs.main_sha }}
+      tag: ${{ steps.request.outputs.tag }}
+    steps:
+      - name: Find the workflow_depot commit this pipeline runs at
+        id: route
+        shell: node {0}
+        # embedded: pipeline/scripts/workflow-sha.cjs
+        run: |
+          'use strict';
+          // pipeline/scripts/workflow-sha.cjs: find the workflow_depot commit this reusable workflow runs at.
+          // Embedded byte for byte in pipeline.yml (shell: node {0}); pipeline/test checks that the two match.
+          // It reads this job's OIDC token, decodes the job_workflow_sha claim and writes `sha=<40 hex>` to
+          // GITHUB_OUTPUT. The signature is not checked: this only picks which commit to check out, and the
+          // authorizer verifies its own token. The token's audience is accepted by no service, so a leaked
+          // token is worthless. The token is never printed.
+          const { appendFileSync } = require('node:fs');
+
+          const AUDIENCE = 'workflow-depot-route';
+          const WORKFLOW = 'susanbeasles/workflow_depot/.github/workflows/pipeline.yml@';
+          const SHA = /^[0-9a-f]{40}$/;
+
+          class RouteError extends Error {}
+
+          function decodeClaims(jwt) {
+            const parts = typeof jwt === 'string' ? jwt.split('.') : [];
+            if (parts.length !== 3 || !/^[A-Za-z0-9_-]+$/.test(parts[1])) throw new RouteError('OIDC token is not a JWT');
+            let claims;
+            try {
+              claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+            } catch {
+              throw new RouteError('OIDC token payload is not JSON');
+            }
+            if (claims === null || typeof claims !== 'object' || Array.isArray(claims)) throw new RouteError('OIDC token payload is not an object');
+            return claims;
+          }
+
+          function workflowSha(claims) {
+            const ref = claims.job_workflow_ref;
+            if (typeof ref !== 'string' || !ref.startsWith(WORKFLOW) || ref.length === WORKFLOW.length) {
+              throw new RouteError('job_workflow_ref is not susanbeasles/workflow_depot pipeline.yml: run this job only inside the reusable pipeline');
+            }
+            const sha = claims.job_workflow_sha;
+            if (typeof sha !== 'string' || !SHA.test(sha)) throw new RouteError('job_workflow_sha is missing or not 40 lowercase hex');
+            return sha;
+          }
+
+          async function oidcToken(env, fetchImpl) {
+            const url = env.ACTIONS_ID_TOKEN_REQUEST_URL;
+            const bearer = env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+            if (!url || !bearer) throw new RouteError('no OIDC token available: the job needs `permissions: id-token: write`');
+            const target = new URL(url);
+            target.searchParams.set('audience', AUDIENCE);
+            const res = await fetchImpl(target, { headers: { authorization: `bearer ${bearer}` }, redirect: 'error', signal: AbortSignal.timeout(15000) });
+            if (res.status !== 200) throw new RouteError(`OIDC token request failed with ${res.status}`);
+            const text = await res.text();
+            if (text.length > 16384) throw new RouteError('OIDC token response too large');
+            let value;
+            try {
+              value = JSON.parse(text).value;
+            } catch {
+              throw new RouteError('OIDC token response is not JSON');
+            }
+            if (typeof value !== 'string') throw new RouteError('OIDC token response has no token');
+            return value;
+          }
+
+          async function main(env = process.env, fetchImpl = fetch, log = console.log) {
+            const sha = workflowSha(decodeClaims(await oidcToken(env, fetchImpl)));
+            if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, `sha=${sha}\n`);
+            log(`workflow_depot pipeline.yml runs at ${sha}`);
+            return sha;
+          }
+
+          module.exports = { AUDIENCE, WORKFLOW, RouteError, decodeClaims, workflowSha, oidcToken, main };
+
+          if (require.main === module) {
+            main().catch((error) => {
+              console.log(`::error title=workflow-sha::${error instanceof RouteError ? error.message : 'unexpected failure'}`);
+              process.exitCode = 1;
+            });
+          }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: susanbeasles/workflow_depot
+          ref: ${{ steps.route.outputs.sha }}
+          path: .workflow-depot
+          persist-credentials: false
+      - name: Ask the authorizer to promote this candidate
+        id: request
+        env:
+          DEPOT_SHA: ${{ steps.route.outputs.sha }}
+          INPUT_ARTIFACT_DIGEST: ${{ needs.build.outputs.artifact_digest }}
+        run: |
+          test "$(git -C .workflow-depot rev-parse HEAD)" = "$DEPOT_SHA"
+          node .workflow-depot/actions/request-promotion/main.mjs

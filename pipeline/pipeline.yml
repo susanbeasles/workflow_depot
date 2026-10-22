@@ -40,13 +40,9 @@ on:
         type: string
         default: npm run build --if-present
       artifact-path:
-        description: File or directory (relative to working-directory) to package and attest. Empty packages `npm pack` output.
+        description: File or directory (relative to working-directory) to package. Empty packages `npm pack` output.
         type: string
         default: ''
-      require-attestation:
-        description: Attest build provenance for the artifact. Set false only where attestations are unavailable.
-        type: boolean
-        default: true
     outputs:
       artifact_digest:
         description: sha256:<hex> of the packaged artifact.
@@ -421,17 +417,15 @@ jobs:
       # Advanced Security for CodeQL and takes far longer than this job. Call
       # .github/workflows/security-assurance.yml from its own caller workflow; see pipeline/README.md.
 
-  build:
-    name: build # the check name is `pipeline / build`; the authorizer requires it exactly
+  build-candidate:
+    name: build-candidate
     needs: [lint-test, quality, security]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
-      id-token: write # Sigstore signing certificate for the provenance attestation
-      attestations: write # store the attestation for the artifact digest
     outputs:
-      artifact_digest: ${{ steps.package.outputs.artifact_digest }}
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
@@ -442,7 +436,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ inputs.node-version }}
-          # No dependency cache in the job that produces the attested artifact.
+          # No dependency cache in the job that produces the released artifact.
           package-manager-cache: false
       - name: Install
         env:
@@ -560,15 +554,46 @@ jobs:
             }
           }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: upload
         with:
           name: pipeline-artifact
           path: ${{ steps.package.outputs.artifact_file }}
           if-no-files-found: error
-          overwrite: true
-      - if: inputs.require-attestation
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+          overwrite: false
+
+  build:
+    name: build # isolated re-hash of the uploaded artifact; no GitHub attestations (releases are cosign-signed)
+    needs: build-candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions: {contents: read}
+    outputs:
+      artifact_digest: ${{ steps.digest.outputs.artifact_digest }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          subject-path: ${{ steps.package.outputs.artifact_file }}
+          artifact-ids: ${{ needs.build-candidate.outputs.artifact_id }}
+          path: ${{ runner.temp }}/signed-artifact
+          merge-multiple: true
+      - name: Hash the downloaded artifact without executing it
+        id: digest
+        shell: node {0}
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}/signed-artifact
+        # embedded: pipeline/scripts/hash-artifact.cjs
+        run: |
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const crypto = require('node:crypto');
+          const names = fs.readdirSync(process.env.ARTIFACT_DIR);
+          if (names.length !== 1) throw Error('Exactly one artifact file required');
+          const file = path.join(process.env.ARTIFACT_DIR, names[0]);
+          if (!/^[A-Za-z0-9._@+-]+$/.test(names[0]) || !fs.lstatSync(file).isFile()) throw Error('Regular artifact file required');
+          const hash = crypto.createHash('sha256');
+          const stream = fs.createReadStream(file);
+          stream.on('error', () => { process.exitCode = 1; });
+          stream.on('data', chunk => hash.update(chunk));
+          stream.on('end', () => fs.appendFileSync(process.env.GITHUB_OUTPUT, `artifact_digest=sha256:${hash.digest('hex')}\n`));
 
   shadow:
     name: shadow # the check name is `pipeline / shadow`; the authorizer requires it exactly

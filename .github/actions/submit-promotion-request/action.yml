@@ -10,10 +10,10 @@ inputs:
     description: Verified release.meta.json
     required: true
   admission_url:
-    description: https URL of the admission Worker endpoint
+    description: Exact HTTPS endpoint enrolled in reviewed depot source
     required: true
   admission_audience:
-    description: OIDC audience the admission Worker expects
+    description: Exact audience paired with the trusted enrolled endpoint
     required: true
   environment:
     description: Target environment (e.g. staging)

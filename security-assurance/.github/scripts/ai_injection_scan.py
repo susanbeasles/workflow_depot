@@ -53,7 +53,7 @@ BASE64_BLOB = re.compile(r"(?:[A-Za-z0-9+/]{4}){60,}={0,2}")
 LATIN = re.compile(r"[A-Za-z]")
 CYRILLIC_GREEK = re.compile(r"[\u0400-\u04FF\u0370-\u03FF]")
 WORD = re.compile(r"\S{3,}")
-FETCH_EXEC = re.compile(r"(curl|wget|iwr|invoke-webrequest)[^|\n]{0,200}\|\s*(ba|z)?sh|npx\s+-y\s+\S+@(latest)?", re.I)
+FETCH_EXEC = re.compile(r"\b(?:curl|wget|iwr|invoke-webrequest)\b[^|\n]{0,200}\|\s*(?:sudo\s+)?(?:ba|z|da)?sh\b|npx\s+-y\s+\S+@(latest)?", re.I)
 
 
 class Findings:
@@ -107,6 +107,14 @@ def scan_text(rel, text, F):
         F.add("medium", "AI-BASE64-BLOB", rel, "large base64 blob in instruction/prose file", line_of(visible, m.start()))
         break
     for m in FETCH_EXEC.finditer(visible):
+        # A bare command name in prose is not a download instruction. Keep
+        # actionable command lines and imperative inline commands blocking.
+        line_start = visible.rfind('\n', 0, m.start()) + 1
+        prefix = visible[line_start:m.start()]
+        command_line = not prefix.strip(' \t`$>')
+        imperative = bool(re.search(r'\b(?:run|execute|install(?:\s+with)?|use)\s*:?\s*`?$', prefix, re.I))
+        if not command_line and not imperative:
+            continue
         F.add("high", "AI-FETCH-AND-EXECUTE", rel, "fetch-and-execute or unpinned npx instruction", line_of(visible, m.start()), m.group(0))
     mixed = 0
     for w in WORD.findall(visible):

@@ -11,7 +11,7 @@ shadow/pr-<n> push ──► pipeline on S ──► request-promotion ──►
 ```
 
 - `S` is the PR squashed onto the current `main` tip: one parent, the merged tree. The pipeline that decides
-  the promotion ran on `S` itself, so `main` only ever holds a tree that was built, scanned, attested and signed.
+  the promotion ran on `S` itself, so `main` only ever holds a tree that was built and scanned.
 - If `main` moves while `S` runs, the promoter rebuilds `S'` and pushes it; the run on `S` ends as
   "superseded" (green, with a warning) and the run on `S'` decides.
 - The PR is closed with a comment naming the commit and the provenance tag. GitHub shows it closed, not merged.
@@ -56,7 +56,6 @@ jobs:
     permissions:
       contents: read
       id-token: write
-      attestations: write
 ```
 
 | Job | Check name | Runs on | Needs |

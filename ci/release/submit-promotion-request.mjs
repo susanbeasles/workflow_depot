@@ -1,7 +1,9 @@
 // Builds a promotion-request/v1 and POSTs it once to the admission Worker with a
 // GitHub Actions OIDC bearer token. Admission URL and audience come from workflow
-// inputs (sourced from the Terraform registry), never from the release bundle.
+// inputs must match reviewed immutable depot-source enrollment before token issuance.
+// Enrollment is empty until actual owner-approved endpoint identities are commissioned.
 // Only the HTTP status and requestId are printed; the token never leaves this process.
+import {requirePromotionEnrollment,promotionEnrollments} from '../trusted-admission.mjs';
 import {randomBytes,createHash} from 'node:crypto';
 import {LIMITS,SCHEMAS,BUCKET,ENVIRONMENT,parseJson,isCanonicalBytes,canonical,formatTimestamp,releaseManifestUri,validateReleaseManifest,validatePromotionRequest} from '../../src/shared/release-contract.mjs';
 import {parseArgs,isMain,runCli,readRegularFile,writeOnce} from './io.mjs';
@@ -32,10 +34,12 @@ export function buildPromotionRequest({manifest,manifestSha256,environment,bucke
   releaseManifestUri:releaseManifestUri(bucket,manifest.application,manifest.releaseTag),releaseManifestSha256:manifestSha256,expectedCurrentGeneration,githubDeploymentId,requestedAt});
 }
 
-export async function requestOidcToken({env,audience,fetch:fetcher=globalThis.fetch,timeoutMs=15000}){
+export async function requestOidcToken({env,audience,fetch:fetcher=globalThis.fetch,timeoutMs=15000,target,enrollments=promotionEnrollments}){
+ requirePromotionEnrollment({...target,audience},enrollments);
  if(!/^[A-Za-z0-9_.:\/-]{1,256}$/.test(audience||''))throw Error('Invalid OIDC audience');
  if(!env.ACTIONS_ID_TOKEN_REQUEST_URL||!env.ACTIONS_ID_TOKEN_REQUEST_TOKEN)throw Error('OIDC is unavailable; the calling job needs permissions: id-token: write');
  const url=validateHttpsUrl(env.ACTIONS_ID_TOKEN_REQUEST_URL,'OIDC request URL');
+ if(!url.hostname.endsWith('.actions.githubusercontent.com')||url.port)throw Error('Untrusted Actions OIDC runtime host');
  url.searchParams.set('audience',audience);
  const response=await fetcher(url.href,{headers:{authorization:`Bearer ${env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}`,accept:'application/json'},redirect:'error',signal:AbortSignal.timeout(timeoutMs)});
  if(response.status!==200)throw Error(`OIDC token request failed with HTTP ${response.status}`);
@@ -48,9 +52,10 @@ export async function requestOidcToken({env,audience,fetch:fetcher=globalThis.fe
 
 // Exactly one POST. A failed or ambiguous submission is reported, never retried:
 // admission deduplicates by requestId, and a new attempt must be a new decision.
-export async function submitPromotion({url,token,request,fetch:fetcher=globalThis.fetch,timeoutMs=30000}){
+export async function submitPromotion({url,token,request,fetch:fetcher=globalThis.fetch,timeoutMs=30000,audience,enrollments=promotionEnrollments}){
  const target=validateHttpsUrl(url,'admission URL');
  validatePromotionRequest(request);
+ requirePromotionEnrollment({url,audience,repository:request.repository,application:request.application,environment:request.environment},enrollments);
  const response=await fetcher(target.href,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json',accept:'application/json'},body:canonical(request),redirect:'error',signal:AbortSignal.timeout(timeoutMs)});
  await response.body?.cancel?.();
  return {status:response.status,ok:response.status>=200&&response.status<300};
@@ -65,8 +70,10 @@ export async function main(argv,env){
  const request=buildPromotionRequest({manifest,manifestSha256:createHash('sha256').update(bytes).digest('hex'),environment:args.environment,bucket:args.bucket,
   expectedCurrentGeneration:Number(args['expected-generation']),githubDeploymentId:Number(args['github-deployment-id']),requestedAt:formatTimestamp(Date.now()),requestId:uuidv7()});
  if(args.out)writeOnce(args.out,new TextEncoder().encode(canonical(request)));
- const token=await requestOidcToken({env,audience:args.audience});
- const result=await submitPromotion({url:args['admission-url'],token,request});
+ const target={url:args['admission-url'],repository:manifest.repository,application:manifest.application,environment:args.environment};
+ requirePromotionEnrollment({...target,audience:args.audience});
+ const token=await requestOidcToken({env,audience:args.audience,target});
+ const result=await submitPromotion({url:args['admission-url'],audience:args.audience,token,request});
  process.stdout.write(`status=${result.status} requestId=${request.requestId}\n`);
  if(!result.ok)throw Error(`admission rejected or failed (HTTP ${result.status}); not retried`);
 }

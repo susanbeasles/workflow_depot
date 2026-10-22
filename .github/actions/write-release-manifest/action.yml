@@ -4,6 +4,9 @@ description: >-
   builder.workflow is <depot_repository>/.github/workflows/release.yml@<depot_sha>, the
   job_workflow_ref that becomes the Fulcio certificate identity when attest-release signs.
 inputs:
+  created_at:
+    description: Trusted runner timestamp from write-authorization-policy output
+    required: true
   release_dir:
     description: Release output directory
     required: true
@@ -30,6 +33,7 @@ runs:
       shell: bash
       env:
         SCRIPTS: ${{ github.action_path }}/../../../ci/release
+        CREATED_AT: ${{ inputs.created_at }}
         RELEASE_DIR: ${{ inputs.release_dir }}
         APPLICATION_PATH: ${{ inputs.application_path }}
         CONTEXT_PATH: ${{ inputs.context_path }}
@@ -38,4 +42,4 @@ runs:
       run: |
         set -euo pipefail
         node "$SCRIPTS/write-release-manifest.mjs" --release-dir "$RELEASE_DIR" --application "$APPLICATION_PATH" --context "$CONTEXT_PATH" \
-          --depot-repository "$DEPOT_REPOSITORY" --depot-sha "$DEPOT_SHA" --github-output "$GITHUB_OUTPUT"
+          --depot-repository "$DEPOT_REPOSITORY" --depot-sha "$DEPOT_SHA" --created-at "$CREATED_AT" --github-output "$GITHUB_OUTPUT"

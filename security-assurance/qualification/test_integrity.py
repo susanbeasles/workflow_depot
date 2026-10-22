@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Adversarial qualification: evidence tampering, scanner compromise (digest mismatch), failed tool install,
 cache poisoning fixtures, sandbox boundary, external-evidence signature gate, false-PASS via forged results."""
-import json, os, shutil, subprocess, sys, tempfile, hashlib, yaml
+import json, os, shutil, subprocess, sys, tempfile, hashlib, yaml, tarfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); S = os.path.join(ROOT, ".github", "scripts")
 ok = True
 def check(n, c):
@@ -33,17 +33,34 @@ json.dump({"items": []}, open(os.path.join(ed, "evidence", "x.findings.json"), "
 py("result.py", "--control", "SCA-OSV", "--status", "PASS", "--tool", "t", "--evidence", os.path.join(ed, "evidence", "x.findings.json"), env={"RESULTS_DIR": ed, "GITHUB_SHA": "a" * 40, "GITHUB_REPOSITORY": "o/r"})
 pol = os.path.join(ROOT, "policy", "release-policy.yml")
 subprocess.run([sys.executable, os.path.join(S, "gate.py"), "--policy", pol, "--results", ed, "--stage", "2", "--sha", "a" * 40, "--repo", "o/r", "--out", os.path.join(ed, "gate-all")], capture_output=True)
-# make it a passing bundle artificially: only SCA-OSV present, so decision FAIL; verify checks digests regardless
+# The verifier authorizes archive bytes only. Build an explicit passing fixture
+# to isolate digest verification from the independently tested policy engine.
+gp = os.path.join(ed, "gate-all", "gate-decision.json")
+gate = json.load(open(gp)); gate.update(decision="PASS", stage="all")
+json.dump(gate, open(gp, "w"))
+mp = os.path.join(ed, "gate-all", "evidence-manifest.json")
+manifest = json.load(open(mp))
+for entry in manifest["entries"]:
+    entry["result_file"] = os.path.relpath(entry["result_file"], ed)
+json.dump(manifest, open(mp, "w"))
+def pack_evidence():
+    with tarfile.open(os.path.join(d, "fixture.tar.gz"), "w:gz") as bundle:
+        for name in ("gate-all", "evidence", "SCA-OSV.json"):
+            bundle.add(os.path.join(ed, name), arcname=name)
+    shutil.copyfile(os.path.join(d, "fixture.tar.gz"), os.path.join(ed, "evidence-bundle.tar.gz"))
+pack_evidence()
 r = py("verify_evidence.py", "--dir", ed, "--sha", "a" * 40, "--repo", "o/r")
-before = r.stdout
+check("verify_evidence accepts complete archive fixture", r.returncode == 0)
 open(os.path.join(ed, "evidence", "x.findings.json"), "a").write(" ")
+pack_evidence()
 r2 = py("verify_evidence.py", "--dir", ed, "--sha", "a" * 40, "--repo", "o/r")
-check("verify_evidence detects evidence tampering", "evidence tampered" in r2.stdout and "evidence tampered" not in before)
+check("verify_evidence detects evidence tampering", r2.returncode == 1 and "signed evidence digest mismatch" in r2.stdout)
 open(os.path.join(ed, "SCA-OSV.json"), "a").write("\n")
+pack_evidence()
 r3 = py("verify_evidence.py", "--dir", ed, "--sha", "a" * 40, "--repo", "o/r")
-check("verify_evidence detects result-file tampering", "result file tampered" in r3.stdout)
+check("verify_evidence detects result-file tampering", r3.returncode == 1 and "signed result digest mismatch" in r3.stdout)
 r4 = py("verify_evidence.py", "--dir", ed, "--sha", "b" * 40, "--repo", "o/r")
-check("verify_evidence rejects wrong sha", "different sha" in r4.stdout)
+check("verify_evidence rejects wrong sha", r4.returncode == 1 and "different sha" in r4.stdout)
 
 # ---- 4. forged result for an unknown control cannot buy coverage; forged PASS for a real control with wrong sha is NOT_RUN ----
 fd = os.path.join(d, "forge"); os.makedirs(fd)

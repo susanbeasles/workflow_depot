@@ -268,7 +268,10 @@ jobs:
           mkdir build-sbom
           syft scan dir:.integration-build/payload -o cyclonedx-json=build-sbom/sbom.cdx.json -o spdx-json=build-sbom/sbom.spdx.json --source-name "$GITHUB_REPOSITORY" --source-version "$GITHUB_SHA"
           python3 .security-depot/ci/release-materials.py .integration-build build-sbom release-materials
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+      # cosign from the tool registry (SHA-256 pinned, fail closed), not a third-party action:
+      # callers' Actions policy allows only owner and GitHub actions.
+      - uses: ./.security-depot/.github/actions/install-tool
+        with: {tool: cosign}
       - name: Sign and verify private release bytes and provenance using OIDC
         env:
           DEPOT_REPOSITORY: ${{ inputs.depot_repository }}

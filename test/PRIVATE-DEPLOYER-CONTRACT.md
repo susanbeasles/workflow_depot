@@ -1,0 +1,3 @@
+The depot export tests run standalone and validate the depot-produced private-subset documents, canonical JSON and referenced module digests. They do not require a sibling checkout or claim qualification against a separately deployed consumer.
+
+The current deployer main parser in worker/contracts/manifest.ts accepts HTTP health objects with path, expectStatus and expectReleaseTag. The proposed private exporter emits {kind: 'worker-version/v1'}. That consumer extension remains an exact dependency in susanbeasles/deployer before this exporter can be commissioned. No consumer authorization or health policy is changed here. The exporter remains an off-repo proposal; successful unit tests do not authorize deployment.

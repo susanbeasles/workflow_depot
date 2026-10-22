@@ -185,8 +185,8 @@ The admission Worker URL and audience come from workflow inputs sourced from the
 resolve-release-context → verify-source (signed tag/commit matches) → build-worker-bundle (per worker target)
 → bundle-migrations → write-authorization-policy → checksum-bundles → assemble-release (release.zip)
 → write-release-manifest → verify-release (independent re-check of every digest, zip hygiene: no symlinks,
-no absolute/`..` paths, bomb ratio ≤ 100×, ≤ 20k entries) → attest-release (cosign sign-blob OIDC +
-`actions/attest-build-provenance`) → publish-release (GitHub Release assets, write-once: fail if tag release exists)
+no absolute/`..` paths, bomb ratio ≤ 100×, ≤ 20k entries) → attest-release (cosign sign-blob OIDC; no GitHub
+artifact attestations) → publish-release (GitHub Release assets, write-once: fail if tag release exists)
 → publish-release-objects (R2, `If-None-Match: *` on every key; temp key then finalize `release.meta.json` last).
 Each step is one composite action in `workflow_depot/.github/actions/<name>/action.yml`, single concern,
 inputs/outputs only, no secrets except the publish steps, all `uses:` pinned to 40-hex SHAs.
