@@ -53,7 +53,7 @@ rule SUSP_Shell_Curl_Pipe_Sh {
   strings:
     // Match executable command positions, not prose examples or test-input
     // string literals. Other malware rules still inspect the complete raw tree.
-    $line = /(^|\n|[;&|])[ \t]*((RUN|CMD)[ \t]+)?(curl|wget)[^\n|]{0,200}\|\s*(sudo\s+)?(ba|z|da)?sh\b/
+   $line = /(^|\n|[;&|])[ \t]*(?:[-*+][ \t]+|\d+[.)][ \t]+)?((RUN|CMD)[ \t]+)?(curl|wget)[^\n|]{0,200}\|\s*(sudo\s+)?(ba|z|da)?sh\b/
     $workflow = /\brun[ \t]*:[ \t]*["']?(curl|wget)[^\n|]{0,200}\|\s*(sudo\s+)?(ba|z|da)?sh\b/
     $execute = /\b(exec|execSync|system|popen)[ \t]*\([ \t]*["'](curl|wget)[^\n|]{0,200}\|\s*(sudo\s+)?(ba|z|da)?sh\b/
     $shell_args = /["']-c["'][ \t]*,[ \t]*["'](curl|wget)[^\n|]{0,200}\|\s*(sudo\s+)?(ba|z|da)?sh\b/
