@@ -7,7 +7,7 @@ import {join,resolve} from 'node:path';
 import {createHash} from 'node:crypto';
 const workflow = JSON.parse(execFileSync('python3', ['-c', 'import json,yaml; print(json.dumps(yaml.load(open("pipeline/pipeline.yml"), Loader=yaml.BaseLoader)))'], {encoding:'utf8'}));
 test('candidate execution cannot request signing credentials', () => {
-  const jobs = Object.values(workflow.jobs).filter(j => j.steps.some(s => /eval "\$CMD"/.test(s.run ?? '')));
+  const jobs = Object.values(workflow.jobs).filter(j => (j.steps ?? []).some(s => /npm (ci|run|rebuild)/.test(s.run ?? '')));
   assert.ok(jobs.length);
   for (const job of jobs) {
     assert.equal(job.permissions['id-token'], undefined);
@@ -34,7 +34,7 @@ test('signer hashes opaque bytes and rejects ambiguous or linked artifacts', () 
     assert.throws(run);
   } finally {rmSync(dir,{recursive:true,force:true});}
 });
-test('required build check attests immutable same-run data on a fresh runner', () => {
+test('required build check hashes immutable same-run data on a fresh runner', () => {
   const signer = workflow.jobs.build;
   assert.equal(signer.needs, 'build-candidate');
   assert.ok(!signer.steps.some(s => s.uses?.startsWith('actions/checkout@') || s.uses?.startsWith('actions/setup-node@')));

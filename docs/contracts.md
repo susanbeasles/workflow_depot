@@ -251,3 +251,95 @@ State, saved plans and credentials never enter Git. Restoring state changes Terr
 against actual resources and review the plan before any apply. Recovery chain: restore configuration → recover/reconcile
 state → recover infrastructure as needed → restore application data. New environments pin OpenTofu `= 1.10.6`.
 Workers and buckets are created/adopted by the root provisioning path; `cf-apply` restrictions stay intact.
+
+## 12. `workflow-depot-pipeline/v1` — `pipeline.json` at the root of every calling repository
+
+Read by `.github/workflows/pipeline.yml` (job `config`) and validated by `ci/pipeline-config.mjs` before any stage
+runs; tests in `test/pipeline-config.test.mjs`. Stage map and caller: [pipeline.md](pipeline.md). Strict object
+shapes, unknown keys rejected at every level, duplicate keys rejected, at most 64 KiB, no symlink. Every path is a
+normalized repository-relative path (`^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$`, at most 200 characters, no `.` or `..`
+segment); `workingDirectory` and `image.context` may also be exactly `.`. Commands are npm script names
+(`^[a-z0-9][a-z0-9:._-]{0,63}$`, run as `npm run <name>`), never shell strings.
+
+| Key | Ecosystem | Type | Rule |
+|---|---|---|---|
+| `schema` | both | string | exactly `workflow-depot-pipeline/v1` |
+| `ecosystem` | both | string | `npm` or `terraform` |
+| `policyProfile` | both | string | `ci-baseline` or `strict`: the security-assurance profile (stage 3) and the coverage threshold (stage 1: 80 and 90 percent of lines) |
+| `workingDirectory` | both | path or `.` | where `package.json` lives; terraform: the repository root the stacks are relative to |
+| `runtime.node` | npm | string | exact `MAJOR.MINOR.PATCH`, 20 or later (the pinned build runtime) |
+| `runtime.opentofu` | terraform | string | exact `MAJOR.MINOR.PATCH` |
+| `scripts.lint`, `scripts.typecheck`, `scripts.test`, `scripts.build` | npm | npm script name | all four required; `test` must write the coverage summary; `build` is the one production build |
+| `rebuild` | npm, optional | array of npm package names, 0 to 16, unique | the only packages whose install scripts run (`npm rebuild <names>` after `npm ci --ignore-scripts`), e.g. `esbuild`, `workerd` |
+| `coverage.summary` | npm | path ending `.json` | Istanbul `json-summary` file the test script writes; `total.lines.pct` must reach the profile threshold |
+| `build.outputDirectory` | npm | path | the build output, packaged deterministically, digested and independently re-hashed (stage 4) |
+| `image` | both | `null` or `{dockerfile, context}` | image recipe; terraform: must be `null`; npm: validates, then fails closed until the image build and attest action exists |
+| `targets.applicationManifest` | npm | path ending `.json`, or `null` | `application-deployment/v1` (section 1) for stage 6 `release.yml`; `null`: no release |
+| `targets.deploy` | npm | array of target ids (`^[a-z0-9-]{1,64}$`), 0 to 32, unique | stage 7: targets registered with the central deployment receiver (`request-deployment.yml`); non-empty requires `applicationManifest` |
+| `targets.stacks` | terraform | array of paths, 1 to 32, unique | Terraform roots the plan and apply cover |
+| `terraform.plan` | terraform | string | `terraform.plan` (stage 4 replacement) |
+| `terraform.apply` | terraform | string | `terraform.apply` (infra) or `root.apply` (infra-root) (stage 7 replacement) |
+
+npm requires `scripts`, `coverage` and `build` and accepts `rebuild`; terraform requires `terraform` and accepts none
+of the npm keys. The `config` job publishes the validated values as job outputs; later jobs read only those outputs,
+and every value reaches a shell through `env:`.
+
+Node Worker application (ProsRUs-like; `test:coverage` must exist and write the summary):
+
+```json
+{
+  "schema": "workflow-depot-pipeline/v1",
+  "ecosystem": "npm",
+  "policyProfile": "ci-baseline",
+  "workingDirectory": ".",
+  "runtime": { "node": "24.10.0" },
+  "scripts": { "lint": "lint", "typecheck": "typecheck", "test": "test:coverage", "build": "verify" },
+  "coverage": { "summary": "coverage/coverage-summary.json" },
+  "build": { "outputDirectory": "dist" },
+  "image": null,
+  "targets": { "applicationManifest": "deployment/application.json", "deploy": [] }
+}
+```
+
+personal-control (Node Worker; `lint`, `test:coverage` and `deployment/application.json` are enrollment work, and
+`esbuild` and `workerd` need their install scripts):
+
+```json
+{
+  "schema": "workflow-depot-pipeline/v1",
+  "ecosystem": "npm",
+  "policyProfile": "ci-baseline",
+  "workingDirectory": ".",
+  "runtime": { "node": "24.10.0" },
+  "scripts": { "lint": "lint", "typecheck": "typecheck", "test": "test:coverage", "build": "build" },
+  "rebuild": ["esbuild", "workerd"],
+  "coverage": { "summary": "coverage/coverage-summary.json" },
+  "build": { "outputDirectory": "dist" },
+  "image": null,
+  "targets": { "applicationManifest": "deployment/application.json", "deploy": ["personal-control"] }
+}
+```
+
+infra (Terraform; the `-root` stacks apply through `root.apply` and need their own repository or a second
+`pipeline.json` decision, see pipeline.md "Open questions"):
+
+```json
+{
+  "schema": "workflow-depot-pipeline/v1",
+  "ecosystem": "terraform",
+  "policyProfile": "ci-baseline",
+  "workingDirectory": ".",
+  "runtime": { "opentofu": "1.10.6" },
+  "terraform": { "plan": "terraform.plan", "apply": "terraform.apply" },
+  "image": null,
+  "targets": {
+    "stacks": [
+      "environments/staging/prosrus",
+      "environments/production/prosrus",
+      "environments/production/backup",
+      "environments/production/backup-execution",
+      "environments/production/provisioner"
+    ]
+  }
+}
+```

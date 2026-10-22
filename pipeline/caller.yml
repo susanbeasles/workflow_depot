@@ -1,31 +1,15 @@
-# Caller template. Install in each repository as .github/workflows/ci.yml (any file name except pipeline.yml,
-# which workflow_depot itself uses for the reusable workflow). The job id must stay `pipeline` and must have
-# no `name:`: the authorizer requires the check names `pipeline / lint-test`, `pipeline / quality`,
-# `pipeline / security` and `pipeline / build`. Replace the SHA with a reviewed workflow_depot commit.
-name: ci
-
+# Caller template: install as .github/workflows/pipeline.yml in each repository, next to a pipeline.json at the
+# repository root (docs/contracts.md section 12). Keep the job id `pipeline` with no `name:` (check names are
+# `pipeline / <job>`), and replace both zero SHAs with the same reviewed workflow_depot commit. shadow/pr-* is the
+# promotion candidate branch (stage 5). The pipeline takes no secrets.
+name: pipeline
 on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
-  push:
-    branches: ['shadow/pr-*']
-
+  pull_request: {branches: [main], types: [opened, synchronize, reopened, ready_for_review]}
+  push: {branches: [main, 'shadow/pr-*'], tags: ['v*.*.*']}
 permissions: {}
-
-concurrency:
-  group: pipeline-${{ github.ref }}
-  cancel-in-progress: true
-
+concurrency: {group: 'pipeline-${{ github.ref }}', cancel-in-progress: "${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}"}
 jobs:
   pipeline:
     uses: susanbeasles/workflow_depot/.github/workflows/pipeline.yml@0000000000000000000000000000000000000000 # REPLACE: reviewed workflow_depot SHA
-    # The most any pipeline job needs; each job inside grants itself less.
-    permissions:
-      contents: read # checkout
-      id-token: write # shadow and promote (authorizer)
-    # Every input is optional; the defaults suit a Node repository with package-lock.json. For example:
-    # with:
-    #   working-directory: app
-    #   test: npm test -- --test-reporter=spec
-    #   artifact-path: dist
+    permissions: {contents: write, id-token: write}
+    with: {depot_ref: '0000000000000000000000000000000000000000'}
