@@ -34,12 +34,18 @@ export function createRotatingSourceFeaturePolicy({storage,producerPolicy,resolv
  return Object.freeze({
   async current(input){const {basePolicyDigest,...publicMetadata}=await current(input);return publicMetadata;},
   async authorizeFeatureCommit(input){
-   const request=structuredClone(input),accepted=await context(request),key=recordKey(request),previous=await storage.get(key);
-   if(previous){const record=await retained(request,accepted);return checked(request,record);}
-   // Base policy validates exact request/parent/ref and authenticates enrolled producer evidence.
+   const request=structuredClone(input),accepted=await context(request),key=recordKey(request);
+   // Reserve before the external effect. An interrupted/ambiguous attempt remains
+   // denied; retrying it requires an independently designed recovery protocol.
+   const reserved=await storage.transaction(async tx=>{
+    const prior=await tx.get(key);
+    if(prior){need(equal(prior.request,request)&&equal(prior.accepted,accepted));return false;}
+    await tx.put(key,{request,accepted,state:'authorization-attempted'});return true;
+   });
+   if(!reserved)return checked(request,await retained(request,accepted));
    const grant=await producerPolicy.authorizeFeatureCommit(structuredClone(request));validGrant(request,grant,accepted);need(equal(await context(request),accepted));
    const record={request,accepted,baseGrant:structuredClone(grant),boundGrant:{...grant,policyDigest:accepted.policyDigest},state:'issued'};
-   await storage.transaction(async tx=>{const prior=await tx.get(key);if(prior){need(equal(prior.request,request)&&equal(prior.accepted,accepted)&&equal(prior.baseGrant,grant));return;}await tx.put(key,record);});
+   await storage.transaction(async tx=>{const prior=await tx.get(key);need(prior?.state==='authorization-attempted'&&equal(prior.request,request)&&equal(prior.accepted,accepted));await tx.put(key,record);});
    return checked(request,await retained(request,accepted));
   },
   async consumeFeatureCommit({request:input,grantID}){

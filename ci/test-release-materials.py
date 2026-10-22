@@ -16,6 +16,14 @@ class ReleaseMaterials(unittest.TestCase):
    for index,limits in enumerate([dict(MAX_ARCHIVE_BYTES=1),dict(MAX_RATIO=0)]):
     with patch.multiple(m,**limits),self.assertRaises(ValueError):m.package(root,sbom,p/f'archive-budget-{index}',env)
     self.assertFalse((p/f'archive-budget-{index}'/'integration-release.tar.gz').exists())
+   original_verify=m.v.verify
+   def replace_after_verification(*args,**kwargs):
+    result=original_verify(*args,**kwargs)
+    if not kwargs.get('metadata_only',False):(root/'payload/app.js').write_bytes(b'evil')
+    return result
+   with patch.object(m.v,'verify',side_effect=replace_after_verification),self.assertRaisesRegex(ValueError,'Packaged bytes differ'):
+    m.package(root,sbom,p/'changed-between-verify-and-package',env)
+   self.assertFalse((p/'changed-between-verify-and-package/integration-release.tar.gz').exists())
    (root/'payload/app.js').write_bytes(b'evil')
    with self.assertRaises(ValueError):m.package(root,sbom,p/'c',env)
 if __name__=='__main__':unittest.main()

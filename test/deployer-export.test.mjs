@@ -3,9 +3,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {exportPrivateRelease} from '../ci/release/export-private-deployer.mjs';
 import {createZip,readZip} from '../ci/release/zip.mjs';
-import {canonicalBytes} from '../src/shared/release-contract.mjs';
-import {parseReleaseManifest} from '../../deployer/worker/contracts/manifest.ts';
-import {parseWorkerArtifact} from '../../deployer/worker/contracts/artifact.ts';
+import {canonicalBytes,parseJson} from '../src/shared/release-contract.mjs';
 const hex=b=>createHash('sha256').update(b).digest('hex');
 function fixture(){
  const artifact={schema:'workflow-depot-worker-artifact/v2',metadata:{main_module:'worker.mjs',compatibility_date:'2026-10-08',compatibility_flags:['nodejs_compat'],bindings:[{name:'ENABLED',type:'plain_text',text:'false'},{name:'KEY',type:'inherit'}]},modules:[{name:'worker.mjs',type:'esm',content:'export default {};'}]};
@@ -15,12 +13,16 @@ function fixture(){
  const manifest={schema:'release-manifest/v2',application:'signing-control',repository:'susanbeasles/signer',repositoryId:42,releaseTag:'v1.0.0',sourceCommit:'a'.repeat(40),createdAt:'2026-10-19T00:00:00Z',builder:{workflow:'susanbeasles/workflow_depot/.github/workflows/release.yml@'+'b'.repeat(40),runId:'1',runAttempt:'1'},artifact:{path:'release.zip',sha256:hex(archive),sizeBytes:archive.length,mediaType:'application/zip'},targets:[{id:'signer',adapter:'cloudflare-worker/v1',artifactPath:'targets/signer.zip',sha256:hex(bundle),sizeBytes:bundle.length,dependsOn:[],healthContract:'worker-version/v1'}],authorizationPolicy:{path:'authorization-policy.json',sha256:hex(policy)},checksums:{path:'checksums.json',sha256:hex(checksums)}};
  return {manifest,archive,artifact};
 }
-test('export produces deterministic referenced modules accepted by unchanged deployer artifact parser',async()=>{
+test('export produces deterministic private-subset documents and referenced modules',async()=>{
  const input=fixture(),a=await exportPrivateRelease(input),b=await exportPrivateRelease(input);
  assert.deepEqual(a.archive,b.archive);const entries=new Map(readZip(a.archive).map(e=>[e.name,e.data]));
- assert.deepEqual(parseReleaseManifest(a.manifestBytes),a.manifest);
- const target=a.manifest.targets[0],bytes=entries.get(target.artifactPath),artifact=parseWorkerArtifact(bytes);
+ assert.deepEqual(parseJson(a.manifestBytes),a.manifest);
+ assert.deepEqual(Object.keys(a.manifest).sort(),['schema','application','repository','repositoryId','releaseTag','sourceCommit','createdAt','artifact','targets'].sort());
+ for(const field of ['schema','application','repository','repositoryId','releaseTag','sourceCommit'])assert.equal(a.manifest[field],input.manifest[field]);
+ assert.deepEqual(a.manifest.artifact,{path:'release.zip',sha256:hex(a.archive),sizeBytes:a.archive.length,mediaType:'application/zip'});
+ const target=a.manifest.targets[0],bytes=entries.get(target.artifactPath),artifact=parseJson(bytes);
  assert.equal(hex(bytes),target.sha256);assert.equal(hex(a.archive),a.manifest.artifact.sha256);
+ assert.deepEqual(artifact,{schema:'worker-artifact/v1',mainModule:'worker.mjs',compatibilityDate:'2026-10-08',compatibilityFlags:['nodejs_compat'],modules:[{name:'worker.mjs',path:'targets/signer/modules/worker.mjs',type:'esm',sha256:hex(new TextEncoder().encode('export default {};'))}],bindings:['ENABLED','KEY']});
  assert.deepEqual(artifact.bindings,['ENABLED','KEY']);assert.equal(hex(entries.get(artifact.modules[0].path)),artifact.modules[0].sha256);
  assert.equal(a.manifest.targets[0].healthContract.kind,'worker-version/v1');assert.equal(entries.has('provenance/depot-release.meta.json'),true);
  assert.deepEqual(a.attestationSubjects,['release.zip','release.manifest.json']);

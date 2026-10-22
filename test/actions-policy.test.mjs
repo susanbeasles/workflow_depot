@@ -18,12 +18,15 @@ function* yamlFiles(dir) {
 }
 
 test("live workflows and actions use only owner or GitHub actions, SHA-pinned", () => {
-  const files = [...yamlFiles(path.join(root, ".github")), path.join(root, "pipeline/pipeline.yml")];
+  const files = [...yamlFiles(path.join(root, ".github")), ...yamlFiles(path.join(root, "security-assurance/.github")), path.join(root, "pipeline/pipeline.yml")];
   const bad = [];
   for (const file of files) {
     for (const [i, line] of readFileSync(file, "utf8").split("\n").entries()) {
       const m = /^\s*-?\s*uses:\s*["']?([^"'\s#]+)/.exec(line);
       if (!m || m[1].startsWith("./")) continue;
+      // This inert adoption template must be replaced by the caller. Its one
+      // exact placeholder is not an executable shipped workflow dependency.
+      if (path.relative(root,file)==="security-assurance/.github/workflows/caller-example.yml" && m[1]==="YOUR-ORG/security-assurance/.github/workflows/security-assurance.yml@PINNED_DEPOT_SHA") continue;
       if (m[1].startsWith("docker://")) { bad.push(`${path.relative(root, file)}:${i + 1} ${m[1]} (container actions are not allowed)`); continue; }
       const ref = m[1];
       const owner = ref.split("/")[0];

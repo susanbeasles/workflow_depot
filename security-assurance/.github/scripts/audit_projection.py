@@ -11,10 +11,32 @@ import os
 from pathlib import Path
 import stat
 import subprocess
+from urllib.parse import urlsplit
 
 NAMES = {'package.json', 'package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'pnpm-workspace.yaml'}
 OMIT_DIRS = {'.git', 'node_modules', '.yarn', '.pnpm', '.venv', 'target', '.build'}
 PACKAGE_FIELDS = {'name', 'version', 'private', 'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'peerDependenciesMeta', 'workspaces', 'engines', 'os', 'cpu', 'resolutions', 'overrides', 'bundledDependencies', 'bundleDependencies'}
+
+
+def validate_npm_lock(value):
+    """Only registry tarballs or bounded in-repository workspace links."""
+    if isinstance(value, dict):
+        if 'resolved' in value:
+            resolved = value['resolved']
+            if not isinstance(resolved, str):
+                raise ValueError('npm lock source must be a string')
+            if value.get('link') is True:
+                if not resolved or '\\' in resolved or resolved.startswith('/') or any(part in ('', '.', '..') for part in resolved.split('/')) or ':' in resolved:
+                    raise ValueError('npm workspace link escapes the projection')
+            else:
+                url = urlsplit(resolved)
+                if url.scheme != 'https' or url.netloc != 'registry.npmjs.org' or url.username or url.password or url.query or url.fragment or not url.path.startswith('/') or url.path.startswith('//') or any(part in ('.', '..') for part in url.path.split('/')):
+                    raise ValueError('npm lock source is outside approved registry')
+        for item in value.values():
+            validate_npm_lock(item)
+    elif isinstance(value, list):
+        for item in value:
+            validate_npm_lock(item)
 
 
 def project(source, destination):
@@ -44,6 +66,11 @@ def project(source, destination):
                 if not isinstance(package, dict):
                     raise ValueError('package.json must be an object')
                 data = json.dumps({key: val for key, val in package.items() if key in PACKAGE_FIELDS}).encode()
+            elif name in {'package-lock.json', 'npm-shrinkwrap.json'}:
+                lock = json.loads(data)
+                if not isinstance(lock, dict):
+                    raise ValueError('npm lockfile must be an object')
+                validate_npm_lock(lock)
             elif name == 'pnpm-workspace.yaml':
                 # Workspace membership is data; pnpm settings/hooks/catalog protocol
                 # selection are not allowed to change the depot toolchain.

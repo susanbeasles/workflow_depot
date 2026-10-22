@@ -24,10 +24,14 @@ jobs:
       - run: sudo apt-get install -y -qq bubblewrap
       - run: python3 qualification/test_gate.py
       - run: python3 qualification/test_scanners.py
+      - name: Qualify command-context AI and YARA rules
+        run: |
+          python3 .github/scripts/install_tool.py --registry policy/tool-registry.yml --tool yara-x --dest "$RUNNER_TEMP/command-context-tools"
+          YARAX="$RUNNER_TEMP/command-context-tools/bin/yr" python3 qualification/test_command_context.py
       - name: Security boundary regressions (synthetic only)
         run: |
           set -e
-          for test in test_action_input_boundaries test_scanner_isolation test_coverage_limits test_ai_payload_medium test_cache_asset_mediums test_cache_yara_failures test_medium_authority_regressions test_python_tool_install test_python_tool_provision test_gate_failure_artifacts; do
+          for test in test_npm_registry_boundary test_action_input_boundaries test_scanner_isolation test_coverage_limits test_ai_payload_medium test_cache_asset_mediums test_cache_yara_failures test_medium_authority_regressions test_python_tool_install test_python_tool_provision test_gate_failure_artifacts; do
             python3 "qualification/$test.py"
           done
       - run: |

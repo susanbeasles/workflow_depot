@@ -76,7 +76,7 @@
     {
       "path": ".github/scripts/audit_projection.py",
       "original_sha256": null,
-      "sha256": "8bdb6be4b7b887ec8ecf886d103e20254cb8563e286ec7e6f194aafbc4d811c8"
+      "sha256": "b689aa0b59595b225b00c9a9f39ab3dd6431b4445d1018d5dc003f4cd19131f2"
     },
     {
       "path": ".github/scripts/cache_inspect.py",
@@ -141,12 +141,12 @@
     {
       "path": ".github/workflows/scanner-qualification.yml",
       "original_sha256": "de4dd868fb3ebb5fc4b7e11416262f19cba5b6ba7ce39416cc5762a7b1d45b47",
-      "sha256": "f02f97d1b123efe17b2f69d68f6eb1541ae5f5a5f2d60d8ebdec00f7ed83186e"
+      "sha256": "ce326794c01e30e403dec1130690ddbf4df901e4aff0cafc1755c428b6dd8d58"
     },
     {
       "path": ".github/workflows/security-assurance.yml",
       "original_sha256": "3999a06eb8a8114b213889641496a5fecc237038e0d1267c0fa754a48f980b41",
-      "sha256": "feccb56f8e0798dbb092011aef0101d4fe0cbf98fa03b45fe852f5dd3f2aab87"
+      "sha256": "6db970078dc1407046a6faa61a41b2e4edf423c96a4cbd88c0ca101f97476555"
     },
     {
       "path": "README.md",
@@ -247,6 +247,16 @@
       "path": "qualification/test_scanner_isolation.py",
       "original_sha256": null,
       "sha256": "48738845ba8ddf1e59090f22fc11c06e1625b76b157a41937eb48661fee2fdc8"
+    },
+    {
+      "path": "qualification/test_npm_registry_boundary.py",
+      "original_sha256": null,
+      "sha256": "1a949274c77953bad7a52a919923f3dd0dcf43eb225ad5e3b947930d869e53eb"
+    },
+    {
+      "path": ".github/actions/dast-zap/action.yml",
+      "original_sha256": "3aa0bb17fc6130181aa8c67fe1a120eb2cd089cd4d439a6ff05f8c9571ce0e6a",
+      "sha256": "f60336612f60acdc63c1e63b153c34b48fdefd0cba855cc0aeb66820dfe01590"
     }
   ],
   "reconciliation": {

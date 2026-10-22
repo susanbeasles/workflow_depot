@@ -11,8 +11,8 @@ MAX_JSON_BYTES=4*1024*1024
 
 def digest(path):
  result=hashlib.sha256()
- with path.open('rb') as stream:
-  while chunk:=stream.read(1024*1024):result.update(chunk)
+ path.seek(0)
+ while chunk:=path.read(1024*1024):result.update(chunk)
  return result.hexdigest()
 
 def regular(path,limit):
@@ -31,12 +31,13 @@ def bounded_tar(archive,compressed):
    data=stream.read(min(size,maximum-self.used+1));self.used+=len(data)
    if self.used>maximum:raise ValueError('Release expanded stream or ratio exceeds budget')
    return data
- with gzip.open(archive,'rb') as stream:
+ archive.seek(0)
+ with gzip.GzipFile(fileobj=archive,mode='rb') as stream:
   with tarfile.open(fileobj=Reader(),mode='r|') as tar:yield tar
 
-def unpack(source,destination,expected_sha):
- source=pathlib.Path(source);destination=pathlib.Path(destination);archive=source/'integration-release.tar.gz'
- compressed=regular(archive,MAX_ARCHIVE_BYTES)
+def _unpack_snapshot(source,destination,expected_sha,archive):
+ source=pathlib.Path(source);destination=pathlib.Path(destination)
+ compressed=os.fstat(archive.fileno()).st_size
  regular(source/'artifact-provenance.json',MAX_JSON_BYTES)
  provenance=json.loads((source/'artifact-provenance.json').read_text())
  if provenance.get('sourceSha')!=expected_sha or provenance.get('bundleSha256')!=digest(archive):raise ValueError('Signed release provenance differs')
@@ -75,4 +76,20 @@ def unpack(source,destination,expected_sha):
   if destination.exists() or destination.is_symlink():raise ValueError('Release destination already exists')
   os.rename(staging,destination)
  return provenance
+def unpack(source,destination,expected_sha):
+ # Copy once into an unlinked private descriptor, then authenticate and parse
+ # precisely those bytes. Path replacements and same-inode writers cannot alter
+ # the authenticated snapshot between preflight and extraction.
+ path=pathlib.Path(source)/'integration-release.tar.gz'
+ with os.fdopen(os.open(path,os.O_RDONLY|os.O_NOFOLLOW),'rb') as original,tempfile.TemporaryFile() as snapshot:
+  info=os.fstat(original.fileno())
+  if not stat.S_ISREG(info.st_mode) or info.st_size>MAX_ARCHIVE_BYTES:raise ValueError('Unsafe or oversized release archive')
+  copied=0
+  while chunk:=original.read(min(1024*1024,MAX_ARCHIVE_BYTES-copied+1)):
+   copied+=len(chunk)
+   if copied>MAX_ARCHIVE_BYTES:raise ValueError('Release archive grew')
+   snapshot.write(chunk)
+  snapshot.flush()
+  return _unpack_snapshot(source,destination,expected_sha,snapshot)
+
 if __name__=='__main__':unpack(sys.argv[1],sys.argv[2],os.environ['GITHUB_SHA'])

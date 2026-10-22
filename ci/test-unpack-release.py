@@ -11,6 +11,18 @@ class Extraction(unittest.TestCase):
    sbom=root/'sbom';sbom.mkdir();(sbom/'sbom.cdx.json').write_text('{"bomFormat":"CycloneDX","components":[]}');(sbom/'sbom.spdx.json').write_text('{"spdxVersion":"SPDX-2.3"}');p.package(build,sbom,root/'release',env)
    with patch.object(pathlib.Path,'read_bytes',side_effect=AssertionError('whole archive buffering')):u.unpack(root/'release',root/'accepted',env['GITHUB_SHA'])
    assert (root/'accepted/payload/app.js').read_bytes()==b'code'
+   archive=root/'release/integration-release.tar.gz';original_bytes=archive.read_bytes()
+   original_tar=u.bounded_tar;passes=0
+   def replace_path_between_passes(*args,**kwargs):
+    nonlocal passes
+    passes+=1
+    if passes==2:archive.write_bytes(b'replacement bytes from candidate writer')
+    return original_tar(*args,**kwargs)
+   with patch.object(u,'bounded_tar',side_effect=replace_path_between_passes):
+    u.unpack(root/'release',root/'snapshot-accepted',env['GITHUB_SHA'])
+   assert passes==2
+   assert (root/'snapshot-accepted/payload/app.js').read_bytes()==b'code'
+   archive.write_bytes(original_bytes)
    with self.assertRaises(ValueError):u.unpack(root/'release',root/'bad-sha','b'*40)
    buffer=io.BytesIO()
    with tarfile.open(fileobj=buffer,mode='w:gz') as tar:
