@@ -53,7 +53,7 @@ BASE64_BLOB = re.compile(r"(?:[A-Za-z0-9+/]{4}){60,}={0,2}")
 LATIN = re.compile(r"[A-Za-z]")
 CYRILLIC_GREEK = re.compile(r"[\u0400-\u04FF\u0370-\u03FF]")
 WORD = re.compile(r"\S{3,}")
-FETCH_EXEC = re.compile(r"(curl|wget|iwr|invoke-webrequest)[ \t]+[^|\s][^|\n]{0,200}\|\s*(sudo\s+)?(ba|z|da)?sh\b|npx\s+-y\s+\S+@(latest)?", re.I)
+FETCH_EXEC = re.compile(r"\b(?:curl|wget|iwr|invoke-webrequest)\b[^|\n]{0,200}\|\s*(?:sudo\s+)?(?:ba|z|da)?sh\b|npx\s+-y\s+\S+@(latest)?", re.I)
 
 
 class Findings:
