@@ -4,7 +4,7 @@ runtime commissioning have not run.
 Reviewed identity: Vespoli Deployment Dispatch, private App owned by
 susanbeasles (215839550). Actions write only, with GitHub's implicit Metadata
 read. No webhook events or active webhook. Installation must use selected
-repositories and contain only susanbeasles/delivery_control (1405415291).
+repositories and contain only susanbeasles/deployer (1405415291).
 Manifest callback: https://provision.vespoli.me/github/callback. This hostname
 is an existing-framework deployment input, not evidence of a commissioned route.
 Do not invent a new publicly accessible registration service to make it work.

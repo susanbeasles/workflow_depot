@@ -3,7 +3,7 @@ import {verifyAppPlan} from './provisioning/plan.mjs';
 import {createGitHubAppProvisioner} from './framework.mjs';
 import {githubEnrollmentProvider} from './enrollment/github.mjs';
 import {canonical,digest} from './ledger.mjs';
-export const dispatchIdentity=Object.freeze({name:'Vespoli Deployment Dispatch',owner:'susanbeasles',ownerID:215839550,repository:'susanbeasles/delivery_control',repositoryID:1405415291,callback:'https://provision.vespoli.me/github/callback'});
+export const dispatchIdentity=Object.freeze({name:'Vespoli Deployment Dispatch',owner:'susanbeasles',ownerID:215839550,repository:'susanbeasles/deployer',repositoryID:1405415291,callback:'https://provision.vespoli.me/github/callback'});
 export const dispatchProfiles=Object.freeze({'deployment-dispatch':{permissions:{actions:'write'},events:[]}});
 export async function deploymentDispatchPlan(){
  const manifest=appManifest({name:dispatchIdentity.name,role:'deployment-dispatch',homepage:'https://vespoli.me',callback:dispatchIdentity.callback,profiles:dispatchProfiles});
@@ -22,6 +22,6 @@ export function createDeploymentDispatchProvisioner({storage,vault,approval,fetc
 // separate assertion is required before any commissioning or token minting.
 export function verifyDispatchInstallation(installation,repositories,appID){
  if(!Number.isSafeInteger(appID)||appID<=0||!Number.isSafeInteger(installation?.id)||installation.id<=0||installation?.app_id!==appID||installation?.account?.id!==dispatchIdentity.ownerID||installation.suspended_at||installation.repository_selection!=='selected'||JSON.stringify(Object.entries(installation.permissions??{}).sort())!==JSON.stringify(Object.entries({actions:'write',metadata:'read'}).sort())||installation.events?.length)throw Error('Dispatch installation scope rejected');
- if(repositories?.total_count!==1||repositories.repositories?.length!==1||repositories.repositories[0].id!==dispatchIdentity.repositoryID||repositories.repositories[0].full_name!==dispatchIdentity.repository)throw Error('Only delivery_control may be installed');
+ if(repositories?.total_count!==1||repositories.repositories?.length!==1||repositories.repositories[0].id!==dispatchIdentity.repositoryID||repositories.repositories[0].full_name!==dispatchIdentity.repository)throw Error('Only deployer may be installed');
  return {verified:true,installationID:installation.id,appID,repositoryID:dispatchIdentity.repositoryID};
 }
