@@ -10,7 +10,7 @@ export function validateIdentity(env){
  if(env.DISPATCH_APP_COMMISSIONED!=='true'||!env.DISPATCH_APP_APPROVAL_REF?.trim())throw Error('Existing dispatch App identity must be separately commissioned');
  for(const name of ['DISPATCH_APP_ID','DISPATCH_INSTALLATION_ID'])if(!/^[1-9]\d*$/.test(env[name]||''))throw Error('Missing exact existing App/installation identity');
  if(!/^[A-Za-z0-9_-]+$/.test(env.DISPATCH_APP_CLIENT_ID||'')||!/^[-a-z0-9]+$/.test(env.DISPATCH_APP_SLUG||'')||!/^op:\/\/[A-Za-z0-9_-]{26}\/[A-Za-z0-9_-]{26}\/[A-Za-z0-9_%.-]+$/.test(env.DISPATCH_APP_PRIVATE_KEY_REF||''))throw Error('Missing existing App client/slug and exact 1Password item field reference');
- if(env.GITHUB_EVENT_NAME!=='push'||env.GITHUB_REF!=='refs/heads/main'||!/^susanbeasles\/[A-Za-z0-9_.-]+$/.test(env.GITHUB_REPOSITORY||'')||env.GITHUB_REPOSITORY==='susanbeasles/delivery_control'||!/^[a-f0-9]{40}$/.test(env.GITHUB_SHA||'')||!/^\d+$/.test(env.GITHUB_RUN_ID||'')||!/^\d+$/.test(env.GITHUB_REPOSITORY_ID||'')||!/^[a-z0-9-]+$/.test(env.DEPLOY_TARGET||''))throw Error('Exact main source and registered target required');
+ if(env.GITHUB_EVENT_NAME!=='push'||env.GITHUB_REF!=='refs/heads/main'||!/^susanbeasles\/[A-Za-z0-9_.-]+$/.test(env.GITHUB_REPOSITORY||'')||env.GITHUB_REPOSITORY==='susanbeasles/deployer'||!/^[a-f0-9]{40}$/.test(env.GITHUB_SHA||'')||!/^\d+$/.test(env.GITHUB_RUN_ID||'')||!/^\d+$/.test(env.GITHUB_REPOSITORY_ID||'')||!/^[a-z0-9-]+$/.test(env.DEPLOY_TARGET||''))throw Error('Exact main source and registered target required');
 }
 async function readPrivateKey(env){
  if(!env.OP_SERVICE_ACCOUNT_TOKEN)throw Error('Missing existing scoped 1Password bootstrap');
@@ -34,7 +34,7 @@ export async function appDispatch(env,{api,readKey=readPrivateKey,clock=()=>Date
   const permissions=issued.permissions||{};
   if(typeof token!=='string'||!token||permissions.actions!=='write'||Object.entries(permissions).some(([k,v])=>k!=='actions'&&!(k==='metadata'&&v==='read'))||!Number.isFinite(Date.parse(issued.expires_at))||Date.parse(issued.expires_at)<=clock()||Date.parse(issued.expires_at)>clock()+3600000)throw Error('Issued token scope/expiry differs');
   const repos=await request('GET','/installation/repositories?per_page=100',token);
-  if(repos.total_count!==1||repos.repositories?.length!==1||repos.repositories[0].id!==repositoryID||repos.repositories[0].full_name!=='susanbeasles/delivery_control')throw Error('Issued token has wrong repository scope');
+  if(repos.total_count!==1||repos.repositories?.length!==1||repos.repositories[0].id!==repositoryID||repos.repositories[0].full_name!=='susanbeasles/deployer')throw Error('Issued token has wrong repository scope');
   return await dispatchRequest({...env,RELEASE_DISPATCH_TOKEN:token});
  }catch{throw Error('Existing App dispatch failed closed; identity, permissions and credential output withheld');}
  finally{if(token){try{await request('DELETE','/installation/token',token);}catch{throw Error('Dispatch token revocation uncertain; no automatic retry');}}}

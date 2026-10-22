@@ -32,7 +32,7 @@ jobs:
             sha: process.env.SOURCE_SHA,
             source_run_id: process.env.SOURCE_RUN_ID,
           }};
-          const response = await fetch('https://api.github.com/repos/susanbeasles/delivery_control/actions/workflows/release.yml/dispatches', {
+          const response = await fetch('https://api.github.com/repos/susanbeasles/deployer/actions/workflows/release.yml/dispatches', {
             method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30000),
             headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2026-03-10', 'Content-Type': 'application/json' },
             body: JSON.stringify(body),

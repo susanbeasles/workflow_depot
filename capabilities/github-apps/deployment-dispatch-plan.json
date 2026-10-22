@@ -3,7 +3,7 @@
   "owner": "susanbeasles",
   "role": "deployment-dispatch",
   "repositories": [
-    "susanbeasles/delivery_control"
+    "susanbeasles/deployer"
   ],
   "manifest": {
     "name": "Vespoli Deployment Dispatch",
