@@ -40,23 +40,22 @@ After that PR merges, for each repository:
 | `config` | | `pipeline / config` | every run | | `contents: read`, `id-token: write` | `depot_ref` must equal the pinned SHA (`job_workflow_sha`); validates `pipeline.json` |
 | `lint-test` | 1 | `pipeline / lint-test` | every run | config | `contents: read` | install, lint, typecheck, test, coverage at the profile threshold |
 | `quality` | 2 | `pipeline / quality` | every run | config | `contents: read` | actionlint, zizmor, lockfile check, commit messages |
-| `security-assurance` | 3 | `pipeline / security-assurance / ...` | every run | config | `contents: read`, `security-events: write`, `id-token: write` | `.github/workflows/security-assurance.yml`: admission, analysis, final gate, signed evidence |
+| `security-assurance` | 3 | `pipeline / security-assurance / ...` | every run | config | `contents: read`, `id-token: write` | `.github/workflows/security-assurance.yml`: admission, analysis, final gate, signed evidence |
 | `security` | 3 | `pipeline / security` | unless cancelled | config, security-assurance | `contents: read` | security-assurance decision must be `PASS`; gitleaks (tree and commit range), `npm audit` |
-| `compile` | 4 | `pipeline / compile` | every run | config and the three above | `contents: read` | working-directory check, one build, package, `sha256`, upload, CycloneDX and SPDX SBOM; no OIDC token while repository scripts run |
-| `build` | 4 | `pipeline / build` | every run where config passed (red when compile failed) | config, compile | `contents: read`, `id-token: write`, `attestations: write` | no repository code: download, digest equals compile's, provenance attestation, `gh attestation verify` |
+| `build-candidate` | 4 | `pipeline / build-candidate` | every run | config and the three above | `contents: read` | working-directory check, one build, package, `sha256`, upload, CycloneDX and SPDX SBOM; no OIDC token while repository scripts run |
+| `build` | 4 | `pipeline / build` | default success dependency gating | build-candidate | `contents: read` | immutable artifact ID download and independent digest; no candidate execution or GitHub attestations |
 | `shadow` | 5 | `pipeline / shadow` | non-draft `pull_request` into `main` from this repository | build | `id-token: write` | `actions/request-shadow` |
 | `promote` | 5 | `pipeline / promote` | `push` to `shadow/pr-*` | build | `id-token: write` | `actions/request-promotion` with the artifact digest |
-| `release` | 6 | `pipeline / release / ...` | `push` to `main` or a `v*` tag, `targets.applicationManifest` set | config, build | `contents: write`, `id-token: write`, `attestations: write` | `.github/workflows/release.yml` |
+| `release` | 6 | `pipeline / release / ...` | `push` to `main` or a `v*` tag, `targets.applicationManifest` set | config, build | `contents: write`, `id-token: write` | `.github/workflows/release.yml` |
 | `deploy` | 7 | `pipeline / deploy` | stage 6 released on `main`, `targets.deploy` not empty | config, release | none | fails closed: the authorizer OIDC `deploy` request is not wired and the PAT dispatch is forbidden |
 | `infra-apply` | 7 | `pipeline / infra-apply` | terraform, `push` to `main` | config, build | none | fails closed: not wired |
 
-For `ecosystem: terraform`, the first step of `lint-test` and `compile` fails closed (no pinned OpenTofu; no
+For `ecosystem: terraform`, the first step of `lint-test` and `build-candidate` fails closed (no pinned OpenTofu; no
 `terraform.plan` request), see docs/pipeline.md. Inputs:
 
 | Input | Default | |
 |---|---|---|
 | `depot_ref` | required | the same full SHA as in `uses:`; `config` fails otherwise |
-| `require-attestation` | `true` | `false` only where GitHub attestations are unavailable |
 
 No secrets (never `inherit`, no named secret). Everything comes from
 `pipeline.json`, validated by `ci/pipeline-config.mjs` in `config`. Commands are npm script names run as
@@ -74,7 +73,6 @@ No secrets (never `inherit`, no named secret). Everything comes from
   | actions/setup-node | `820762786026740c76f36085b0efc47a31fe5020` | v7.0.0 |
   | actions/upload-artifact | `cf430e030ddbb5b0abf93d22962f4752f3646cd9` | v7.0.2 |
   | actions/download-artifact | `9000827ccba6bdab643e8b6fd33ac0654aef8333` | v8.0.2 (the pin security-assurance.yml uses) |
-  | actions/attest-build-provenance | `4d101475d8b20a2381f78447822ac1eab6504dd8` | v4.2.2 (wraps actions/attest `508db95d…` v4.2.1) |
 
 - Tools are pinned binaries, checked before use. **gitleaks 8.30.1**: the tarball sha256 from
   `security-assurance/policy/tool-registry.yml`, which cross-checked it against upstream checksums.
@@ -107,17 +105,16 @@ No secrets (never `inherit`, no named secret). Everything comes from
   work in progress. Marking the PR ready (`ready_for_review` in the caller) starts the run that does ask. Fork
   PRs skip `shadow`: they get no OIDC token, and the authorizer refuses them (`is_fork`).
 
-### Known limit: signing shares the build job
+### Isolated artifact verification
 
-ADR-0002 fixes the job list, and the brief puts the attestation in `build`. Every step in a job can mint an
-OIDC token once `id-token: write` is granted, so the caller's build tooling (devDependencies) shares the job
-with the signer. A compromised build dependency could therefore attest an artifact of its choice under the
-pipeline identity. It could already have tampered with the artifact itself, so this adds no new access, but it
-falls short of SLSA Build L3 isolation. Two things narrow the risk: `npm ci --ignore-scripts`, and the
-authorizer's binding of the attestation to the candidate commit and run. The isolated alternative is to
-attest in `promote`, which runs no repository code: download the artifact, recompute its digest, compare it
-with `needs.build.outputs.artifact_digest`, then attest. That needs `attestations: write` on `promote` and an
-ADR amendment.
+Candidate install, lifecycle, build, package and SBOM work runs in `build-candidate` with contents read only.
+The required `pipeline / build` check runs on a fresh runner, downloads the immutable same-run artifact ID and
+independently hashes one regular file without executing it. Both jobs retain default success dependency gating.
+The public authorizer contract remains the four checks lint-test, quality, security and build.
+
+This generic pipeline produces no GitHub artifact attestation. Cosign release signatures remain a separate
+release mechanism. A caller whose enrolled authorizer policy requires generic pipeline provenance remains
+fail closed until a compatible producer is qualified; this rebase does not change that policy.
 
 ## Embedded scripts
 

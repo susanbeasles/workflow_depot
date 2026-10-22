@@ -5,8 +5,8 @@ inputs:
   out_path: { description: Directory mounted read-write at /out (created empty), required: true }
   ro_mounts: { description: "Space-separated host:mount pairs mounted read-only (toolchains)", default: "" }
   command: { description: Command line executed inside the sandbox (via /bin/sh -c), required: true }
-  timeout_s: { default: "900" }
-  mem_mb: { default: "4096" }
+  timeout_s: { description: "Positive timeout in seconds (1–86400)", default: "900" }
+  mem_mb: { description: "Positive memory limit in MiB (1–262144)", default: "4096" }
 outputs:
   rc: { value: "${{ steps.run.outputs.rc }}" }
 runs:
@@ -22,8 +22,22 @@ runs:
         fi
     - id: run
       shell: bash
+      env:
+        INPUT_COMMAND: ${{ inputs.command }}
+        INPUT_MEM_MB: ${{ inputs.mem_mb }}
+        INPUT_OUT_PATH: ${{ inputs.out_path }}
+        INPUT_RO_MOUNTS: ${{ inputs.ro_mounts }}
+        INPUT_SOURCE_PATH: ${{ inputs.source_path }}
+        INPUT_TIMEOUT_S: ${{ inputs.timeout_s }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
-        set +e; rm -rf "${{ inputs.out_path }}"; mkdir -p "${{ inputs.out_path }}"
-        RO=(); for m in ${{ inputs.ro_mounts }}; do RO+=(--ro "$m"); done
-        "${{ github.action_path }}/../../scripts/sandbox_exec.sh" --src "${{ inputs.source_path }}" --out "${{ inputs.out_path }}" "${RO[@]}" --timeout "${{ inputs.timeout_s }}" --mem-mb "${{ inputs.mem_mb }}" -- /bin/sh -c '${{ inputs.command }}'
+        set -euo pipefail
+        [[ "$INPUT_TIMEOUT_S" =~ ^[1-9][0-9]{0,4}$ ]] && (( INPUT_TIMEOUT_S <= 86400 )) || { echo "::error::invalid timeout"; exit 2; }
+        [[ "$INPUT_MEM_MB" =~ ^[1-9][0-9]{0,5}$ ]] && (( INPUT_MEM_MB <= 262144 )) || { echo "::error::invalid memory limit"; exit 2; }
+        [ -n "$INPUT_SOURCE_PATH" ] && [ -n "$INPUT_OUT_PATH" ] || exit 2
+        rm -rf -- "$INPUT_OUT_PATH"; mkdir -p -- "$INPUT_OUT_PATH"
+        RO=(); MOUNTS=(); read -r -d '' -a MOUNTS <<< "$INPUT_RO_MOUNTS" || true
+        for m in "${MOUNTS[@]}"; do RO+=(--ro "$m"); done
+        set +e
+        "$ACTION_PATH/../../scripts/sandbox_exec.sh" --src "$INPUT_SOURCE_PATH" --out "$INPUT_OUT_PATH" "${RO[@]}" --timeout "$INPUT_TIMEOUT_S" --mem-mb "$INPUT_MEM_MB" -- /bin/sh -c "$INPUT_COMMAND"
         echo "rc=$?" >> "$GITHUB_OUTPUT"

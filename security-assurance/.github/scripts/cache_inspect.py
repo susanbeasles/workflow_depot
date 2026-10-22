@@ -170,31 +170,71 @@ def walk_zip(data, rel, F, context):
             if context == "wheel" and n.endswith(".dist-info/RECORD"):
                 records = zf.open(info).read().decode(errors="replace")
         if context == "wheel" and records:
-            verify_wheel_record(zf, records, rel, F)
+            try:
+                verify_wheel_record(zf, records, rel, F)
+            except csv.Error:
+                F.add("high", "WHEEL-RECORD-INVALID", rel, "malformed RECORD CSV")
         elif context == "wheel":
             F.add("high", "WHEEL-NO-RECORD", rel, "wheel without RECORD (cannot verify member hashes)")
 
 
 def verify_wheel_record(zf, records, rel, F):
     names = set(zf.namelist())
-    bad = 0
-    for row in csv.reader(io.StringIO(records)):
-        if len(row) < 2 or not row[1]:
+    listed = set()
+    for row in csv.reader(io.StringIO(records), strict=True):
+        if len(row) != 3 or not row[0] or row[0] in listed:
+            F.add("high", "WHEEL-RECORD-INVALID", rel, "malformed or duplicate RECORD row")
             continue
-        path, digest = row[0], row[1]
+        path, digest, size = row
+        listed.add(path)
         if path not in names:
+            F.add("high", "WHEEL-RECORD-INVALID", rel, f"{path}: recorded member absent")
             continue
-        alg, b64 = digest.split("=", 1)
+        # Only RECORD itself may omit its own hash and size (PEP 427).
+        if path.endswith(".dist-info/RECORD") and not digest and not size:
+            continue
         try:
-            actual = base64.urlsafe_b64encode(hashlib.new(alg, zf.open(path).read()).digest()).rstrip(b"=").decode()
+            alg, encoded = digest.split("=", 1)
+            if alg not in {"sha256", "sha384", "sha512"} or not re.fullmatch(r"[A-Za-z0-9_-]+", encoded):
+                raise ValueError("unsupported or malformed digest")
+            expected = base64.b64decode(encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True)
+            hasher = hashlib.new(alg)
+            if len(expected) != hasher.digest_size or base64.urlsafe_b64encode(expected).rstrip(b"=").decode() != encoded:
+                raise ValueError("noncanonical or wrong-length digest")
+            if not re.fullmatch(r"0|[1-9][0-9]*", size) or len(size) > 12:
+                raise ValueError("invalid member size")
+            info = zf.getinfo(path)
+            if info.file_size > MAX_SIZE or int(size) != info.file_size:
+                raise ValueError("member size mismatch or verification limit exceeded")
+            total = 0
+            with zf.open(info) as stream:
+                while True:
+                    chunk = stream.read(min(65536, MAX_SIZE + 1 - total))
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > MAX_SIZE:
+                        raise ValueError("member verification limit exceeded")
+                    hasher.update(chunk)
+            if total != int(size):
+                raise ValueError("member read size mismatch")
         except Exception:
+            F.add("high", "WHEEL-RECORD-INVALID", rel, f"{path}: unsupported, malformed or unreadable RECORD verification data")
             continue
-        if actual != b64:
-            bad += 1
+        if hasher.digest() != expected:
             F.add("critical", "WHEEL-RECORD-MISMATCH", rel, f"{path}: RECORD hash does not match content")
     for n in names:
-        if not n.endswith("/") and not n.endswith("RECORD") and n not in {r[0] for r in csv.reader(io.StringIO(records)) if r}:
+        if not n.endswith("/") and not n.endswith((".dist-info/RECORD.jws", ".dist-info/RECORD.p7s")) and n not in listed:
             F.add("high", "WHEEL-UNLISTED-MEMBER", rel, f"{n} not in RECORD")
+
+
+def within_root(path, root):
+    """Canonical component boundary, including intermediate symlinks; never a string prefix."""
+    try:
+        resolved_root, resolved = os.path.realpath(root), os.path.realpath(path)
+        return os.path.commonpath([resolved_root, resolved]) == resolved_root
+    except (OSError, ValueError):
+        return False
 
 
 def inspect_file(path, rel, F, kind):
@@ -205,10 +245,10 @@ def inspect_file(path, rel, F, kind):
         return
     if stat.S_ISLNK(st.st_mode):
         tgt = os.readlink(path)
-        norm = os.path.normpath(os.path.join(os.path.dirname(path), tgt))
-        root = os.path.abspath(ROOT)
-        if tgt.startswith("/") and not os.path.abspath(tgt).startswith(root) or not os.path.abspath(norm).startswith(root):
+        if not within_root(path, ROOT):
             F.add("critical", "SYMLINK-ESCAPE", rel, f"-> {tgt}")
+        elif not os.path.exists(path):
+            F.add("high", "SYMLINK-DANGLING", rel, f"-> {tgt}")
         return
     if not stat.S_ISREG(st.st_mode):
         return
@@ -319,8 +359,7 @@ def node_modules(root, lockfile, F):
         for fn in os.listdir(binsdir):
             p = os.path.join(binsdir, fn)
             if os.path.islink(p):
-                tgt = os.path.normpath(os.path.join(binsdir, os.readlink(p)))
-                if not os.path.abspath(tgt).startswith(os.path.abspath(root)):
+                if not within_root(p, root):
                     F.add("critical", "NODE_MODULES-BIN-ESCAPE", f"node_modules/.bin/{fn}", f"-> {os.readlink(p)}")
 
 
@@ -356,7 +395,11 @@ def main():
     else:
         n = 0
         for dp, dns, fns in os.walk(a.root):
-            dns[:] = [d for d in dns if d not in SKIP]
+            for name in dns:
+                directory = os.path.join(dp, name)
+                if os.path.islink(directory):
+                    inspect_file(directory, os.path.relpath(directory, a.root), F_, a.kind)
+            dns[:] = [d for d in dns if d not in SKIP and not os.path.islink(os.path.join(dp, d))]
             for fn in fns:
                 p = os.path.join(dp, fn)
                 try:

@@ -7,7 +7,7 @@ import {LIMITS,BUCKET,parseJson,validateReleaseManifest} from '../../src/shared/
 import {sha256Hex,signRequest,amzDateOf} from './sigv4.mjs';
 import {parseArgs,isMain,runCli,readRegularFile} from './io.mjs';
 
-export const OBJECT_ORDER=['release.zip','release.zip.sigstore.json','release.zip.intoto.jsonl','sbom.cdx.json','sbom.spdx.json',
+export const OBJECT_ORDER=['release.zip','release.zip.sigstore.json','sbom.cdx.json','sbom.spdx.json',
  'checksums.json','SHA256SUMS','authorization-policy.json','release.meta.json.sigstore.json','release.meta.json'];
 const CONTENT_TYPES={zip:'application/zip',json:'application/json',jsonl:'application/jsonl'};
 const contentTypeOf=name=>CONTENT_TYPES[name.split('.').at(-1)]||'text/plain; charset=utf-8';

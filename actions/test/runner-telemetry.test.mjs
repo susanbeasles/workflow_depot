@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -57,6 +58,16 @@ test('aggregation math: cpu mean/p95/max from deltas, memory peak/mean, counter 
   assert.equal(percentile([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 95), 10);
 });
 const round = v => Number(v.toFixed(4));
+
+test('CPU mean weights unequal sample intervals by their total CPU time', () => {
+  const t = aggregate([
+    { t: 0, cpu_busy: 0, cpu_total: 0 },
+    { t: 10000, cpu_busy: 500, cpu_total: 1000 },
+    { t: 11000, cpu_busy: 600, cpu_total: 1100 },
+  ], { intervalS: 10, arch: 'x64', cpuCount: 1 });
+  assert.equal(t.cpu_mean, round(600 / 1100));
+  assert.equal(t.cpu_max, 1);
+});
 
 test('the output line: one marker, schema v1, numbers plus os/arch/cpu count only (no env, paths, hosts or commands)', () => {
   const t = aggregate([{ t: 0, cpu_busy: 0, cpu_total: 0 }, { t: 1000, cpu_busy: 1, cpu_total: 2 }], { intervalS: 1, arch: 'x64', cpuCount: 2 });
@@ -145,6 +156,17 @@ test('never fails the job: bad input, missing runner files, spawn errors and sto
   assert.equal(stop({ STATE_pid: '5', STATE_file: '/nonexistent/x', STATE_interval: '5' }, { platform: 'linux', procRoot: procRoot(), write: l => out.push(l), log: l => logs.push(l) }), null);
   assert.equal(stop({ STATE_pid: '5', STATE_file: '/x', STATE_interval: '5' }, { platform: 'linux', write: () => { throw new Error('stdout closed'); }, log: () => { throw new Error('also broken'); } }), null);
   assert.equal(out.length, 0);
+});
+
+test('an asynchronous spawn failure never crashes the telemetry action process', () => {
+  const { env, files } = actionEnv();
+  const module = new URL('../runner-telemetry/start.mjs', import.meta.url).href;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e',
+    `import { start } from ${JSON.stringify(module)}; start(${JSON.stringify(env)}, { platform: 'linux', execPath: ${JSON.stringify(join(files.temp, 'missing-node'))} });`],
+  { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /sampler not started/);
+  assert.equal(result.stderr, '');
 });
 
 test('real process on this Linux host: the detached sampler runs and stop emits a valid line', { skip: process.platform !== 'linux' }, async () => {

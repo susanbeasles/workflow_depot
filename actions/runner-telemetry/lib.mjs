@@ -133,10 +133,13 @@ export function aggregate(samples, { intervalS, arch, cpuCount }) {
   if (!Array.isArray(samples) || samples.length < 2) return null;
   const list = samples.slice(-(MAX_SAMPLES + 1));
   const cpu = [];
+  let busyTotal = 0, cpuTotal = 0;
   for (let i = 1; i < list.length; i++) {
     const db = num(list[i].cpu_busy) - num(list[i - 1].cpu_busy), dt = num(list[i].cpu_total) - num(list[i - 1].cpu_total);
     if ([list[i].cpu_busy, list[i - 1].cpu_busy, list[i].cpu_total, list[i - 1].cpu_total].some(v => num(v) === null) || dt <= 0 || db < 0) continue;
     cpu.push(Math.min(1, Math.max(0, db / dt)));
+    busyTotal += Math.min(db, dt);
+    cpuTotal += dt;
   }
   const used = list.filter(s => int(s.mem_total) !== null && int(s.mem_available) !== null && s.mem_available <= s.mem_total).map(s => s.mem_total - s.mem_available);
   const totals = list.map(s => int(s.mem_total)).filter(v => v !== null);
@@ -148,7 +151,7 @@ export function aggregate(samples, { intervalS, arch, cpuCount }) {
     cpu_count: Number.isSafeInteger(cpuCount) && cpuCount >= 1 ? Math.min(cpuCount, 4096) : 1,
     memory_total_bytes: totals.length ? Math.max(...totals) : null,
     samples: list.length, duration_s: round(Math.max(0, duration), 1), interval_s: intervalS,
-    cpu_mean: cpu.length ? round(cpu.reduce((a, b) => a + b, 0) / cpu.length, 4) : null,
+    cpu_mean: cpu.length ? round(busyTotal / cpuTotal, 4) : null,
     cpu_p95: cpu.length ? round(percentile(cpu, 95), 4) : null,
     cpu_max: cpu.length ? round(Math.max(...cpu), 4) : null,
     memory_used_max_bytes: used.length ? Math.max(...used) : null,

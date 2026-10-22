@@ -1,0 +1,12 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const names = fs.readdirSync(process.env.ARTIFACT_DIR);
+if (names.length !== 1) throw Error('Exactly one artifact file required');
+const file = path.join(process.env.ARTIFACT_DIR, names[0]);
+if (!/^[A-Za-z0-9._@+-]+$/.test(names[0]) || !fs.lstatSync(file).isFile()) throw Error('Regular artifact file required');
+const hash = crypto.createHash('sha256');
+const stream = fs.createReadStream(file);
+stream.on('error', () => { process.exitCode = 1; });
+stream.on('data', chunk => hash.update(chunk));
+stream.on('end', () => fs.appendFileSync(process.env.GITHUB_OUTPUT, `artifact_digest=sha256:${hash.digest('hex')}\n`));

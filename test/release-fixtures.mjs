@@ -111,7 +111,7 @@ export async function buildRelease(f,{out=f.out,ctx=context(),app=application()}
    ?await buildWorkerBundle({appRoot:f.app,application:app,targetId:t.id,wranglerOutdir:outdirs[t.id],outDir:out,releaseTag:ctx.releaseTag,sourceCommit:ctx.sourceCommit})
    :bundleMigrations({appRoot:f.app,application:app,targetId:t.id,outDir:out});
  }
- write(out,'authorization-policy.json',canonicalBytes(authorizationPolicy({application:app,context:ctx,depotRepository:DEPOT.repository,depotSha:DEPOT.sha,sourceDateEpoch:SOURCE_DATE_EPOCH})));
+ write(out,'authorization-policy.json',canonicalBytes(authorizationPolicy({application:app,context:ctx,depotRepository:DEPOT.repository,depotSha:DEPOT.sha,clock:()=>Date.parse(CREATED_AT)})));
  write(out,'sbom.cdx.json',JSON.stringify({bomFormat:'CycloneDX',specVersion:'1.6',components:[]}));
  write(out,'sbom.spdx.json',JSON.stringify({spdxVersion:'SPDX-2.3',packages:[]}));
  writeChecksums(out);

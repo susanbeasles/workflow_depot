@@ -15,10 +15,15 @@ runs:
         # ---------- Python ----------
         if [ "$(has python)" = true ]; then
           BV=$(pyver bandit); PV=$(pyver pip-audit); T0=$SECONDS
-          pip install --disable-pip-version-check -q "bandit==$BV" "pip-audit==$PV" >"$E/py-tools-install.log" 2>&1
+          PYTOOLS=$(python3 "$S/python_tool_install.py" --registry "$R" --tools bandit pip-audit 2>"$E/py-tools-install.log"); PYTOOLS_RC=$?
+          if [ "$PYTOOLS_RC" -ne 0 ]; then
+            python3 "$S/result.py" --control SAST-BANDIT --domain A --status TOOL_FAILURE --reason "hash-locked Python wheel provisioning unavailable or invalid" --tool bandit
+            python3 "$S/result.py" --control SCA-PIP-AUDIT --domain D --status TOOL_FAILURE --reason "hash-locked Python wheel provisioning unavailable or invalid" --tool pip-audit
+          else
+          export PATH="$PYTOOLS:$PATH"
           timeout 600 bandit -r . -f json -o "$E/bandit.json" -x './.git,./node_modules,./.venv,./venv,./tests,./test' -ll >"$E/bandit.log" 2>&1; RC=$?
           python3 "$S/normalize.py" --tool bandit --in "$E/bandit.json" --out "$E/bandit.findings.json"; NF="$E/bandit.findings.json"
-          case $RC in 0) ST=PASS;; 1) ST=FAIL;; *) ST=TOOL_FAILURE;; esac; grep -q '"parse_error": "' "$NF" 2>/dev/null && ST=TOOL_FAILURE
+          case $RC in 0|1) ST=$(st "$(python3 "$S/count_blocking.py" "$NF" high)");; *) ST=TOOL_FAILURE;; esac  # exit 1 only means "findings"; the policy fail_on severities decide, after reviewed accepted findings
           python3 "$S/result.py" --control SAST-BANDIT --domain A --status $ST --reason "bandit exit $RC" --tool bandit --tool-version "$BV" --findings-json "$E/bandit.findings.json" --evidence "$E/bandit.findings.json" --duration-s $((SECONDS-T0))
           T0=$SECONDS; REQ=$(ls requirements*.txt 2>/dev/null | head -1)
           if [ -n "$REQ" ]; then timeout 600 pip-audit -r "$REQ" --no-deps --skip-editable -f json -o "$E/pip-audit.json" >"$E/pip-audit.log" 2>&1; RC=$?
@@ -28,6 +33,7 @@ runs:
           else python3 "$S/normalize.py" --tool pip-audit --in "$E/pip-audit.json" --out "$E/pip-audit.findings.json"; NF="$E/pip-audit.findings.json"
             case $RC in 0) ST=PASS;; 1) ST=FAIL;; *) ST=TOOL_FAILURE;; esac; grep -q '"parse_error": "' "$NF" 2>/dev/null && ST=TOOL_FAILURE
             python3 "$S/result.py" --control SCA-PIP-AUDIT --domain D --status $ST --reason "pip-audit exit $RC" --tool pip-audit --tool-version "$PV" --findings-json "$E/pip-audit.findings.json" --evidence "$E/pip-audit.findings.json" --duration-s $((SECONDS-T0)); fi
+          fi # Python tool qualification
         else
           python3 "$S/result.py" --control SAST-BANDIT --domain A --status NOT_APPLICABLE --reason "no Python detected" --tool bandit
           python3 "$S/result.py" --control SCA-PIP-AUDIT --domain D --status NOT_APPLICABLE --reason "no Python detected" --tool pip-audit
@@ -60,43 +66,34 @@ runs:
           fi
           # ---- package-manager audit: npm / pnpm / yarn ----
           T0=$SECONDS
-          if [ -f package-lock.json ]; then
-            timeout 900 npm ci --ignore-scripts --no-audit --no-fund >"$E/npm-ci.log" 2>&1; CI_RC=$?
-            timeout 300 npm audit --json --audit-level=none >"$E/npm-audit.json" 2>"$E/npm-audit.err"; RC=$?
+          # Candidate PM configuration is never copied or executed. Install exact
+          # depot-selected entrypoints outside the candidate and scrub each audit env.
+          AUDIT_BASE=$(mktemp -d "$RUNNER_TEMP/package-audit.XXXXXX")
+          AUDIT_ROOT="$AUDIT_BASE/project"; AUDIT_TC="$AUDIT_BASE/toolchain"; mkdir -p "$AUDIT_TC"
+          python3 "$S/audit_projection.py" project --source "$PWD" --destination "$AUDIT_ROOT"; PROJECT_RC=$?
+          ( cd "$AUDIT_TC" && env -i PATH="$PATH" HOME="$AUDIT_BASE" npm install --ignore-scripts --no-audit --no-fund --package-lock=false --registry=https://registry.npmjs.org npm@11.6.2 pnpm@10.19.0 yarn@1.22.22 @yarnpkg/cli-dist@4.10.3 ) >"$E/audit-toolchain-install.log" 2>&1; TC_RC=$?
+          ln -s "$(command -v node)" "$AUDIT_TC/node"
+          audit() { python3 "$S/audit_projection.py" exec --root "$AUDIT_ROOT" --toolchain "$AUDIT_TC" -- "$@"; }
+          if [ "$PROJECT_RC" -ne 0 ] || [ "$TC_RC" -ne 0 ]; then
+            python3 "$S/result.py" --control SCA-NPM-AUDIT --domain D --status TOOL_FAILURE --reason "trusted package audit projection/toolchain preparation failed" --tool package-audit
+          elif [ -f package-lock.json ]; then
+            audit npm ci --ignore-scripts --no-audit --no-fund >"$E/npm-ci.log" 2>&1; CI_RC=$?
+            audit npm audit --json --audit-level=none >"$E/npm-audit.json" 2>"$E/npm-audit.err"; RC=$?
             python3 "$S/normalize.py" --tool npm-audit --in "$E/npm-audit.json" --out "$E/npm-audit.findings.json"; NF="$E/npm-audit.findings.json"
             if [ $CI_RC -ne 0 ] || grep -q '"parse_error": "' "$NF"; then ST=TOOL_FAILURE; elif [ $RC -eq 0 ]; then ST=PASS; elif [ $RC -eq 1 ]; then ST=FAIL; else ST=TOOL_FAILURE; fi
-            python3 "$S/result.py" --control SCA-NPM-AUDIT --domain D --status $ST --reason "npm ci --ignore-scripts exit $CI_RC, npm audit exit $RC" --tool npm --tool-version "$(npm -v)" --findings-json "$NF" --evidence "$NF" --duration-s $((SECONDS-T0))
+            python3 "$S/result.py" --control SCA-NPM-AUDIT --domain D --status $ST --reason "npm ci --ignore-scripts exit $CI_RC, npm audit exit $RC" --tool npm --tool-version "$(audit npm -v)" --findings-json "$NF" --evidence "$NF" --duration-s $((SECONDS-T0))
             # installed tree vs lockfile + npm cache content inspection (CACHE-CONTENT is emitted by the cache-content action in this job)
-            echo "node_modules_installed=true" >> "$GITHUB_ENV"
+            echo "PACKAGE_AUDIT_ROOT=$AUDIT_ROOT" >> "$GITHUB_ENV"
+            echo "PACKAGE_AUDIT_CACHE=$AUDIT_BASE/audit-cache" >> "$GITHUB_ENV"
           elif [ -f pnpm-lock.yaml ]; then
-            command -v pnpm >/dev/null || npm install -g --ignore-scripts pnpm@10 >/dev/null 2>&1
-            timeout 300 pnpm audit --json --lockfile-only >"$E/pnpm-audit.json" 2>"$E/pnpm-audit.err"; RC=$?
-            python3 - "$E/pnpm-audit.json" "$E/npm-audit.findings.json" <<'PY'
-        import json,sys
-        try: d=json.load(open(sys.argv[1]))
-        except Exception as e: json.dump({"items":[],"parse_error":str(e)},open(sys.argv[2],"w")); sys.exit(3)
-        items=[{"severity":a.get("severity","unknown"),"rule":f"GHSA/{a.get('github_advisory_id','')}" if a.get("github_advisory_id") else "pnpm-audit","package":f"{a.get('module_name')}@{a.get('vulnerable_versions','')}","path":"pnpm-lock.yaml","message":a.get("title","")[:200]} for a in d.get("advisories",{}).values()]
-        json.dump({"items":items},open(sys.argv[2],"w"))
-        PY
+            audit pnpm --ignore-pnpmfile audit --json --lockfile-only >"$E/pnpm-audit.json" 2>"$E/pnpm-audit.err"; RC=$?
+            python3 "$S/pnpm_audit_result.py" --input "$E/pnpm-audit.json" --output "$E/npm-audit.findings.json" --exit-code "$RC"
             N=$(python3 "$S/count_blocking.py" "$E/npm-audit.findings.json" critical,high); [ $RC -gt 1 ] && N=ERR
-            python3 "$S/result.py" --control SCA-NPM-AUDIT --domain D --status $(st "$N") --reason "pnpm audit exit $RC" --tool pnpm --tool-version "$(pnpm -v 2>/dev/null)" --findings-json "$E/npm-audit.findings.json" --evidence "$E/npm-audit.findings.json" --duration-s $((SECONDS-T0))
+            python3 "$S/result.py" --control SCA-NPM-AUDIT --domain D --status $(st "$N") --reason "pnpm audit exit $RC" --tool pnpm --tool-version "$(audit pnpm -v 2>/dev/null)" --findings-json "$E/npm-audit.findings.json" --evidence "$E/npm-audit.findings.json" --duration-s $((SECONDS-T0))
           elif [ -f yarn.lock ]; then
-            if grep -q "__metadata" yarn.lock; then timeout 300 corepack yarn npm audit --all --recursive --json >"$E/yarn-audit.json" 2>"$E/yarn-audit.err"; RC=$?; MODE=berry
-            else timeout 300 npx --yes --package yarn@1 yarn audit --json >"$E/yarn-audit.json" 2>"$E/yarn-audit.err"; RC=$?; MODE=classic; fi
-            python3 - "$E/yarn-audit.json" "$E/npm-audit.findings.json" <<'PY'
-        import json,sys
-        items=[]; bad=None
-        for l in open(sys.argv[1],errors="replace"):
-            l=l.strip()
-            if not l.startswith("{"): continue
-            try: r=json.loads(l)
-            except Exception: bad="non-JSON line"; continue
-            if r.get("type")=="auditAdvisory":
-                a=r["data"]["advisory"]; items.append({"severity":a.get("severity","unknown"),"rule":f"GHSA/{a.get('github_advisory_id','')}","package":f"{a.get('module_name')}@{a.get('vulnerable_versions','')}","path":"yarn.lock","message":a.get("title","")[:200]})
-            elif "value" in r and "children" in r:
-                items.append({"severity":str(r["children"].get("Severity","unknown")).lower(),"rule":r.get("value",""),"package":r["children"].get("Vulnerable Versions",""),"path":"yarn.lock","message":str(r["children"].get("Issue",""))[:200]})
-        json.dump({"items":items,"parse_error":bad},open(sys.argv[2],"w"))
-        PY
+            if grep -q "__metadata" yarn.lock; then audit yarn-berry npm audit --all --recursive --json >"$E/yarn-audit.json" 2>"$E/yarn-audit.err"; RC=$?; MODE=berry
+            else audit yarn-classic audit --json --ignore-scripts --ignore-path >"$E/yarn-audit.json" 2>"$E/yarn-audit.err"; RC=$?; MODE=classic; fi
+            python3 "$S/yarn_audit_result.py" --input "$E/yarn-audit.json" --output "$E/npm-audit.findings.json" --mode "$MODE" --exit-code "$RC"
             N=$(python3 "$S/count_blocking.py" "$E/npm-audit.findings.json" critical,high); [ $RC -gt 1 ] && [ "$MODE" = berry ] && N=ERR
             python3 "$S/result.py" --control SCA-NPM-AUDIT --domain D --status $(st "$N") --reason "yarn ($MODE) audit exit $RC" --tool yarn --findings-json "$E/npm-audit.findings.json" --evidence "$E/npm-audit.findings.json" --duration-s $((SECONDS-T0))
           else

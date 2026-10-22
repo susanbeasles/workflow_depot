@@ -47,7 +47,7 @@ test('a freshly built release verifies, including against the application manife
   assert.equal(manifest.artifact.sha256,hex(readFileSync(join(f.out,'release.zip'))));
   const policy=json(join(f.out,'authorization-policy.json'));
   assert.equal(policy.signer.identity,`https://github.com/${manifest.builder.workflow}`);
-  assert.equal(policy.expiresAt,'2027-10-03T04:00:00Z');
+  assert.equal(policy.expiresAt,'2027-10-15T12:00:00Z');
   assert.deepEqual(policy.environments.production,{allowedRefs:['refs/tags/v*'],requiredApprovals:1,targets:['demoapp-d1-migrations','demoapp-worker']});
  });
 });
@@ -120,7 +120,7 @@ test('cross-document identity checks: policy, signer, release marker and applica
   const app=application(),ctx=context();
   await buildWorkerBundle({appRoot:f.app,application:app,targetId:'demoapp-worker',wranglerOutdir:f.wranglerOut,outDir:f.out,releaseTag:workerTag,sourceCommit:ctx.sourceCommit});
   bundleMigrations({appRoot:f.app,application:app,targetId:'demoapp-d1-migrations',outDir:f.out});
-  write(f.out,'authorization-policy.json',canonicalBytes(authorizationPolicy({application:app,context:policyCtx,depotRepository:DEPOT.repository,depotSha,sourceDateEpoch:SOURCE_DATE_EPOCH})));
+  write(f.out,'authorization-policy.json',canonicalBytes(authorizationPolicy({application:app,context:policyCtx,depotRepository:DEPOT.repository,depotSha,clock:()=>Date.parse(CREATED_AT)})));
   reseal(f.out);
  };
  const cases={
@@ -143,15 +143,14 @@ test('cross-document identity checks: policy, signer, release marker and applica
 
 test('signed stage requires structurally valid Sigstore bundles',async()=>{
  await withRelease(async f=>{
-  await assert.rejects(()=>verifyRelease(f.out,{stage:'signed'}),/missing: release.zip.sigstore.json, release.meta.json.sigstore.json, release.zip.intoto.jsonl/);
+  await assert.rejects(()=>verifyRelease(f.out,{stage:'signed'}),/missing: release.zip.sigstore.json, release.meta.json.sigstore.json\)/);
   write(f.out,'release.zip.sigstore.json',SIGNATURE);
   write(f.out,'release.meta.json.sigstore.json',SIGNATURE);
-  write(f.out,'release.zip.intoto.jsonl',SIGNATURE+'\n');
   await assert.rejects(()=>verifyRelease(f.out),/unexpected: release.meta.json.sigstore.json/);
   assert.equal((await verifyRelease(f.out,{stage:'signed'})).releaseTag,'v1.2.3');
-  writeFileSync(join(f.out,'release.zip.intoto.jsonl'),'{"not":"a bundle"}\n');
+  writeFileSync(join(f.out,'release.zip.sigstore.json'),'{"not":"a bundle"}');
   await assert.rejects(()=>verifyRelease(f.out,{stage:'signed'}),/not a Sigstore bundle/);
-  writeFileSync(join(f.out,'release.zip.intoto.jsonl'),'');
+  writeFileSync(join(f.out,'release.zip.sigstore.json'),'');
   await assert.rejects(()=>verifyRelease(f.out,{stage:'signed'}),/empty/);
   await assert.rejects(()=>verifyRelease(f.out,{stage:'published'}),/stage must be/);
  });
@@ -160,9 +159,8 @@ test('signed stage requires structurally valid Sigstore bundles',async()=>{
 test('published layout verifies the GitHub Release asset set without loose bundles',async()=>{
  await withRelease(async f=>{
   for(const name of ['release.zip.sigstore.json','release.meta.json.sigstore.json'])write(f.out,name,SIGNATURE);
-  write(f.out,'release.zip.intoto.jsonl',SIGNATURE+'\n');
-  const assets=join(f.root,'assets');
-  for(const name of ['release.zip','release.zip.sigstore.json','release.meta.json','release.meta.json.sigstore.json','release.zip.intoto.jsonl','sbom.cdx.json','sbom.spdx.json','checksums.json','SHA256SUMS','authorization-policy.json'])
+   const assets=join(f.root,'assets');
+  for(const name of ['release.zip','release.zip.sigstore.json','release.meta.json','release.meta.json.sigstore.json','sbom.cdx.json','sbom.spdx.json','checksums.json','SHA256SUMS','authorization-policy.json'])
    write(assets,name,readFileSync(join(f.out,name)));
   const result=await verifyRelease(assets,{stage:'signed',layout:'published',application:application()});
   assert.deepEqual(result.targets.map(t=>t.id),['demoapp-d1-migrations','demoapp-worker']);
@@ -173,5 +171,31 @@ test('published layout verifies the GitHub Release asset set without loose bundl
   rmSync(join(assets,'targets'),{recursive:true});
   const zip=readFileSync(join(assets,'release.zip'));zip[zip.length-30]^=1;writeFileSync(join(assets,'release.zip'),zip);
   await assert.rejects(()=>verifyRelease(assets,{stage:'signed',layout:'published'}),/release.zip digest does not match/);
+ });
+});
+
+test('future commit timestamp cannot extend authorization in generator or full verifier',async()=>{
+ assert.throws(()=>authorizationPolicy({application:application(),context:context(),depotRepository:DEPOT.repository,depotSha:DEPOT.sha,sourceDateEpoch:4102444800,clock:()=>Date.parse(CREATED_AT)}),/source date epoch/);
+ await withRelease(async f=>{
+  const policy=json(join(f.out,'authorization-policy.json'));
+  policy.expiresAt=new Date((4102444800+365*86400)*1000).toISOString().replace('.000Z','Z');
+  write(f.out,'authorization-policy.json',canonicalBytes(policy));reseal(f.out);
+  await assert.rejects(verifyRelease(f.out),/expiry must be positive and at most 400 days/);
+ });
+});
+test('trusted release clock preserves default365 and maximum400 days',()=>{
+ const base={application:application(),context:context(),depotRepository:DEPOT.repository,depotSha:DEPOT.sha,clock:()=>Date.parse(CREATED_AT)};
+ for(const days of [365,400])assert.equal(Date.parse(authorizationPolicy({...base,validityDays:days}).expiresAt)-Date.parse(CREATED_AT),days*86400000);
+ assert.throws(()=>authorizationPolicy({...base,validityDays:401}),/1..400/);
+});
+
+test('full verifier rejects substituting a future signed manifest creation time',async()=>{
+ await withRelease(async f=>{
+  const policy=json(join(f.out,'authorization-policy.json'));
+  policy.expiresAt='2101-01-01T00:00:00Z';
+  write(f.out,'authorization-policy.json',canonicalBytes(policy));reseal(f.out);
+  const manifest=json(join(f.out,'release.meta.json'));manifest.createdAt='2100-01-01T00:00:00Z';
+  writeFileSync(join(f.out,'release.meta.json'),canonicalBytes(manifest));
+  await assert.rejects(verifyRelease(f.out),/future release creation time/);
  });
 });

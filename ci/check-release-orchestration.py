@@ -18,14 +18,12 @@ PINNED = re.compile(
     r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_./-]+)?@[0-9a-f]{40}$"
 )
 # Third-party pins allowed in release code: the qualified registry entries plus the
-# lead-reviewed attest-build-provenance v4.2.2 commit.
+# GitHub-owned artifact actions. GitHub artifact attestations are not used.
 ALLOWED_PINS = {
     "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
     "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1",
     "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
     "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
-    "sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6",
-    "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8",
 }
 REQUIRED_ACTIONS = [
     "compute-release-version",
@@ -139,7 +137,7 @@ expected_permissions = {
     "prepare": {"contents": "read"},
     "worker-bundles": {"contents": "read"},
     "bundle": {"contents": "read"},
-    "attest": {"contents": "read", "id-token": "write", "attestations": "write"},
+    "attest": {"contents": "read", "id-token": "write"},
     "publish": {"contents": "write"},
     "publish-objects": {"contents": "read"},
 }

@@ -11,7 +11,7 @@ shadow/pr-<n> push ──► pipeline on S ──► request-promotion ──►
 ```
 
 - `S` is the PR squashed onto the current `main` tip: one parent, the merged tree. The pipeline that decides
-  the promotion ran on `S` itself, so `main` only ever holds a tree that was built, scanned, attested and signed.
+  the promotion ran on `S` itself, so `main` only ever holds a tree that was built and scanned.
 - If `main` moves while `S` runs, the promoter rebuilds `S'` and pushes it; the run on `S` ends as
   "superseded" (green, with a warning) and the run on `S'` decides.
 - The PR is closed with a comment naming the commit and the provenance tag. GitHub shows it closed, not merged.
@@ -49,7 +49,7 @@ concurrency: {group: 'pipeline-${{ github.ref }}', cancel-in-progress: "${{ gith
 jobs:
   pipeline:
     uses: susanbeasles/workflow_depot/.github/workflows/pipeline.yml@0000000000000000000000000000000000000000 # REPLACE: reviewed workflow_depot SHA
-    permissions: {contents: write, id-token: write, attestations: write, security-events: write}
+    permissions: {contents: write, id-token: write}
     with: {depot_ref: '0000000000000000000000000000000000000000'}
 ```
 

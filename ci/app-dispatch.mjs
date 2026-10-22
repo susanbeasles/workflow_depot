@@ -4,6 +4,7 @@ import {promisify} from 'node:util';
 import {pathToFileURL} from 'node:url';
 import {installCLI} from '../capabilities/onepassword/install-cli.mjs';
 import {dispatch} from './dispatch-deployment.mjs';
+import {requireDispatchEnrollment,dispatchEnrollments} from './trusted-admission.mjs';
 const execute=promisify(execFile),owner='susanbeasles',ownerID=215839550,repositoryID=1405415291;
 export function validateIdentity(env){
  if(env.DISPATCH_APP_COMMISSIONED!=='true'||!env.DISPATCH_APP_APPROVAL_REF?.trim())throw Error('Existing dispatch App identity must be separately commissioned');
@@ -17,8 +18,8 @@ async function readPrivateKey(env){
  try{return (await execute(cli.binary,['--config',cli.config,'--cache=false','read',env.DISPATCH_APP_PRIVATE_KEY_REF],{env:{PATH:env.PATH,HOME:env.HOME,LANG:'C.UTF-8',OP_SERVICE_ACCOUNT_TOKEN:env.OP_SERVICE_ACCOUNT_TOKEN},encoding:'utf8',timeout:30000,maxBuffer:32768})).stdout;}finally{await cli.cleanup();}
 }
 const encode=v=>Buffer.from(JSON.stringify(v)).toString('base64url');
-export async function appDispatch(env,{api,readKey=readPrivateKey,clock=()=>Date.now(),dispatchRequest=dispatch}={}){
- validateIdentity(env);let token;
+export async function appDispatch(env,{api,readKey=readPrivateKey,clock=()=>Date.now(),dispatchRequest=dispatch,enrollments=dispatchEnrollments}={}){
+ validateIdentity(env);requireDispatchEnrollment(env,enrollments);let token;
  const request=api??(async(method,path,auth,body)=>{const r=await fetch('https://api.github.com'+path,{method,redirect:'error',signal:AbortSignal.timeout(30000),headers:{...(auth?{Authorization:'Bearer '+auth}:{}),Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2026-03-10',...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});if(!r.ok)throw Error('GitHub App operation failed');return r.status===204?{}:r.json();});
  try{
   const publicApp=await request('GET','/apps/'+env.DISPATCH_APP_SLUG,undefined);

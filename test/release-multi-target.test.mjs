@@ -127,9 +127,8 @@ test('two workers and one D1 target: end-to-end release verifies and is byte-sta
 
   await assert.rejects(()=>verifyRelease(f.out,{application:application()}),/targets do not match the application manifest/);
   for(const name of ['release.zip.sigstore.json','release.meta.json.sigstore.json'])write(f.out,name,SIGNATURE);
-  write(f.out,'release.zip.intoto.jsonl',SIGNATURE+'\n');
-  const published=join(f.root,'published');
-  for(const name of ['release.zip','release.zip.sigstore.json','release.meta.json','release.meta.json.sigstore.json','release.zip.intoto.jsonl','sbom.cdx.json','sbom.spdx.json','checksums.json','SHA256SUMS','authorization-policy.json'])
+   const published=join(f.root,'published');
+  for(const name of ['release.zip','release.zip.sigstore.json','release.meta.json','release.meta.json.sigstore.json','sbom.cdx.json','sbom.spdx.json','checksums.json','SHA256SUMS','authorization-policy.json'])
    write(published,name,readFileSync(join(f.out,name)));
   assert.equal((await verifyRelease(published,{stage:'signed',layout:'published',application:app})).targets.length,3);
  }finally{f.cleanup();}

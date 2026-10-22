@@ -21,6 +21,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+from pathlib import Path
 import sys
 
 STATUSES = {"PASS", "FAIL", "INCONCLUSIVE", "NOT_APPLICABLE", "NOT_RUN", "TOOL_FAILURE", "POLICY_UNAVAILABLE"}
@@ -92,10 +93,15 @@ def main():
 
     evidence = []
     for path in a.evidence:
+        try:
+            relative = Path(path).resolve().relative_to(Path(results_dir).resolve()).as_posix()
+        except ValueError:
+            print("::error::evidence must be contained in RESULTS_DIR", file=sys.stderr)
+            sys.exit(2)
         if os.path.isfile(path):
-            evidence.append({"path": path, "sha256": sha256_file(path), "bytes": os.path.getsize(path)})
+            evidence.append({"path": relative, "sha256": sha256_file(path), "bytes": os.path.getsize(path)})
         else:
-            evidence.append({"path": path, "missing": True})
+            evidence.append({"path": relative, "missing": True})
 
     now = dt.datetime.now(dt.timezone.utc).isoformat()
     rec = {

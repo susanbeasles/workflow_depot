@@ -48,12 +48,12 @@ test('release scripts run end to end as CLIs with argv arrays and GITHUB_OUTPUT'
   run('build-worker-bundle.mjs','plan','--app-root',f.app,'--application',application,'--target','demoapp-worker','--github-output',output);
   run('build-worker-bundle.mjs','bundle','--app-root',f.app,'--application',application,'--target','demoapp-worker','--wrangler-outdir',f.wranglerOut,'--out-dir',out,'--release-tag','v0.1.0','--source-commit',sha,'--github-output',output);
   run('bundle-migrations.mjs','--app-root',f.app,'--application',application,'--targets','["demoapp-d1-migrations"]','--out-dir',out);
-  run('write-authorization-policy.mjs','--application',application,'--context',context,'--depot-repository','example-owner/workflow_depot','--depot-sha',DEPOT_SHA,'--source-date-epoch','1791000000','--out-dir',out);
+  run('write-authorization-policy.mjs','--application',application,'--context',context,'--depot-repository','example-owner/workflow_depot','--depot-sha',DEPOT_SHA,'--out-dir',out);
   run('unpack-targets.mjs','--release-dir',out,'--out',join(f.root,'payload'));
   writeFileSync(join(out,'sbom.cdx.json'),'{"bomFormat":"CycloneDX"}');writeFileSync(join(out,'sbom.spdx.json'),'{"spdxVersion":"SPDX-2.3"}');
   run('checksum-bundles.mjs','--release-dir',out);
   run('assemble-release.mjs','--release-dir',out,'--github-output',output);
-  run('write-release-manifest.mjs','--release-dir',out,'--application',application,'--context',context,'--depot-repository','example-owner/workflow_depot','--depot-sha',DEPOT_SHA,'--created-at','2026-10-15T00:00:00Z','--github-output',output);
+  run('write-release-manifest.mjs','--release-dir',out,'--application',application,'--context',context,'--depot-repository','example-owner/workflow_depot','--depot-sha',DEPOT_SHA,'--github-output',output);
   assert.match(run('verify-release.mjs','--release-dir',out,'--application',application,'--github-output',output),/^verified demoapp v0\.1\.0 \(unsigned\)/);
   const outputs=Object.fromEntries(readFileSync(output,'utf8').trim().split('\n').map(line=>line.split(/=(.*)/s).slice(0,2)));
   assert.equal(outputs.released,'true');assert.equal(outputs.release_tag,'v0.1.0');assert.equal(outputs.worker_targets,'["demoapp-worker"]');assert.equal(outputs.migrations_targets,'["demoapp-d1-migrations"]');
@@ -64,4 +64,9 @@ test('release scripts run end to end as CLIs with argv arrays and GITHUB_OUTPUT'
   const injected=spawnSync(process.execPath,[join(scripts,'resolve-context.mjs'),'--release-tag','v1.0.0;id','--out',join(f.root,'x.json')],{env,encoding:'utf8'});
   assert.equal(injected.status,1);
  }finally{f.cleanup();}
+});
+
+test('legacy attacker source-date-epoch CLI cannot extend authorization',()=>{
+ const result=spawnSync(process.execPath,[join(scripts,'write-authorization-policy.mjs'),'--source-date-epoch','4102444800'],{encoding:'utf8'});
+ assert.notEqual(result.status,0);assert.match(result.stderr,/Unknown argument.*source-date-epoch/);
 });

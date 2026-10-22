@@ -24,7 +24,7 @@ jobs:
       target: ${{ inputs.target }}
   dispatch:
     needs: artifact
-    permissions: {contents: read}
+    permissions: {contents: read, id-token: write}
     uses: ./.github/workflows/request-deployment.yml
     with:
       depot_ref: ${{ inputs.depot_ref }}

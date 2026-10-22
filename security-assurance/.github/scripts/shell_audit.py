@@ -68,13 +68,17 @@ def main():
         dns[:] = [d for d in dns if d not in (".git", "node_modules", "target", ".venv", "venv")]
         for fn in fns:
             p = os.path.join(dp, fn)
-            if os.path.islink(p) or os.path.getsize(p) > 2_000_000:
+            if os.path.islink(p):
                 continue
             rel = os.path.relpath(p, a.root)
             with open(p, "rb") as f:
                 head = f.read(256)
             ext = os.path.splitext(fn)[1].lower()
             is_shell = ext in (".sh", ".bash", ".zsh", ".ksh", ".bashrc", ".zshrc", ".profile") or bool(SHEBANG.match(head)) or fn in (".bashrc", ".zshrc", ".profile", ".bash_profile", ".zprofile", ".zshenv")
+            inline_file = fn in ("Makefile", "Justfile", "Dockerfile", "package.json") or fn.endswith((".mk", "Dockerfile")) or (rel.startswith(".github/workflows") and ext in (".yml", ".yaml"))
+            if (is_shell or inline_file) and os.path.getsize(p) > 2_000_000:
+                F.append({"severity": "high", "rule": "SH-SIZE-LIMIT", "path": rel, "message": "file exceeds 2000000 bytes; coverage incomplete"})
+                continue
             if is_shell:
                 text = open(p, errors="replace").read()
                 scan_text(text, rel, F, is_zsh=(ext == ".zsh" or b"zsh" in head[:40] or fn.startswith(".zsh")))
@@ -87,7 +91,7 @@ def main():
                     for k, v in json.load(open(p)).get("scripts", {}).items():
                         scan_text(v, f"{rel}#scripts.{k}", F, inline=True)
                 except Exception:
-                    pass
+                    F.append({"severity": "high", "rule": "SH-SCAN-ERROR", "path": rel, "message": "cannot inspect package scripts; coverage incomplete"})
             elif rel.startswith(".github/workflows") and ext in (".yml", ".yaml"):
                 text = open(p, errors="replace").read()
                 for m in re.finditer(r"run:\s*\|?\s*\n((?:[ \t]+.*\n)+)|run:\s*(.+)", text):

@@ -1,0 +1,33 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {createHash} from 'node:crypto';
+import {createRotatingSourceFeaturePolicy} from '../src/source-feature-policy.mjs';
+const canonical=v=>v&&typeof v==='object'?(Array.isArray(v)?'['+v.map(canonical).join(',')+']':'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canonical(v[k])).join(',')+'}'):JSON.stringify(v);
+const hash=v=>createHash('sha256').update(canonical(v)).digest('hex');
+function fixture(){let key={signerKeyID:'SHA256:'+'A'.repeat(43),signerVersion:1,signerConfigDigest:'a'.repeat(64),signerAuthorityDigest:'b'.repeat(64)},revoked=false,consumes=0,loseConsume=false;let tail=Promise.resolve();const records=new Map(),storage={get:async k=>structuredClone(records.get(k)),transaction:fn=>{const result=tail.then(()=>fn({get:async k=>structuredClone(records.get(k)),put:async(k,v)=>records.set(k,structuredClone(v))}));tail=result.catch(()=>{});return result;}};
+ const grant=request=>({authorized:true,requestDigest:hash(request),policyDigest:'c'.repeat(64),signerKeyID:request.signerKeyID,producerID:'accepted-producer',producerEvidenceDigest:'d'.repeat(64),grantID:'e'.repeat(64),expiresAt:request.expiresAt});
+ const producerPolicy={current:async()=>{if(revoked)throw Error('revoked');return {authority:'workflow_depot',repositoryID:42,repository:'susanbeasles/signer',policyDigest:'c'.repeat(64)};},authorizeFeatureCommit:async r=>grant(r),checkFeatureCommit:async({request})=>{if(revoked)throw Error('revoked');return grant(request);},consumeFeatureCommit:async({request})=>{consumes++;if(loseConsume)throw Error('response lost after possible effect');if(revoked)throw Error('revoked');return grant(request);}};
+ const api=createRotatingSourceFeaturePolicy({storage,producerPolicy,resolveKey:async()=>structuredClone(key),clock:()=>100});
+ const request={repositoryID:42,repository:'susanbeasles/signer',nonce:'f'.repeat(64),signerKeyID:key.signerKeyID,expiresAt:150};
+ return {api,request,rotate:()=>key={...key,signerVersion:2,signerConfigDigest:'9'.repeat(64)},revoke:()=>revoked=true,loseConsume:()=>loseConsume=true,consumes:()=>consumes};}
+test('policy binds grants once; current changes at rotation and old grants fail all paths',async()=>{const f=fixture(),current=await f.api.current({repositoryID:42}),grant=await f.api.authorizeFeatureCommit(f.request);assert.equal(grant.policyDigest,current.policyDigest);assert.deepEqual(await f.api.authorizeFeatureCommit(f.request),grant);f.rotate();assert.notEqual((await f.api.current({repositoryID:42})).policyDigest,current.policyDigest);for(const method of ['authorizeFeatureCommit','consumeFeatureCommit','checkFeatureCommit'])await assert.rejects(f.api[method](method==='authorizeFeatureCommit'?f.request:{request:f.request,grantID:grant.grantID}));assert.equal(f.consumes(),0);});
+test('policy delegates revocation and consumes at most once without retrying ambiguous effects',async()=>{const f=fixture(),grant=await f.api.authorizeFeatureCommit(f.request),input={request:f.request,grantID:grant.grantID};await f.api.consumeFeatureCommit(input);await assert.rejects(f.api.consumeFeatureCommit(input));assert.equal(f.consumes(),1);assert.deepEqual(await f.api.checkFeatureCommit(input),grant);f.revoke();await assert.rejects(f.api.checkFeatureCommit(input));});
+test('policy rejects scope/request changes and missing base authority',async()=>{const f=fixture(),grant=await f.api.authorizeFeatureCommit(f.request);await assert.rejects(f.api.checkFeatureCommit({request:{...f.request,repository:'susanbeasles/other'},grantID:grant.grantID}));await assert.rejects(f.api.authorizeFeatureCommit({...f.request,expiresAt:151}));assert.throws(()=>createRotatingSourceFeaturePolicy({}));});
+
+test('ambiguous external consumption is durably denied without a second external effect',async()=>{const f=fixture(),grant=await f.api.authorizeFeatureCommit(f.request),input={request:f.request,grantID:grant.grantID};f.loseConsume();await assert.rejects(f.api.consumeFeatureCommit(input),/response lost/);await assert.rejects(f.api.consumeFeatureCommit(input));await assert.rejects(f.api.checkFeatureCommit(input));await assert.rejects(f.api.authorizeFeatureCommit(f.request));assert.equal(f.consumes(),1);});
+test('consume and check require the issued grantID',async()=>{const f=fixture();await f.api.authorizeFeatureCommit(f.request);for(const grantID of [undefined,'','0'.repeat(64)])for(const m of ['consumeFeatureCommit','checkFeatureCommit'])await assert.rejects(f.api[m]({request:f.request,grantID}));assert.equal(f.consumes(),0);});
+
+test('concurrent authorization reserves once and ambiguous effects never retry',async()=>{
+ let tail=Promise.resolve(),calls=0,release;
+ const gate=new Promise(r=>release=r),records=new Map();
+ const clone=v=>structuredClone(v);
+ const storage={get:async k=>clone(records.get(k)),transaction:fn=>{const result=tail.then(()=>fn({get:async k=>clone(records.get(k)),put:async(k,v)=>records.set(k,clone(v))}));tail=result.catch(()=>{});return result;}};
+ const key={signerKeyID:'SHA256:'+'A'.repeat(43),signerVersion:1,signerConfigDigest:'a'.repeat(64),signerAuthorityDigest:'b'.repeat(64)};
+ const producerPolicy={current:async()=>({authority:'workflow_depot',repositoryID:42,repository:'susanbeasles/signer',policyDigest:'c'.repeat(64)}),authorizeFeatureCommit:async()=>{calls++;await gate;throw Error('ambiguous authorization');},consumeFeatureCommit:async()=>{throw Error('unexpected consume');},checkFeatureCommit:async()=>{throw Error('unexpected check');}};
+ const api=createRotatingSourceFeaturePolicy({storage,producerPolicy,resolveKey:async()=>key,clock:()=>100});
+ const request={repositoryID:42,repository:'susanbeasles/signer',nonce:'f'.repeat(64),signerKeyID:key.signerKeyID,expiresAt:150};
+ const first=api.authorizeFeatureCommit(request);
+ while(calls===0)await Promise.resolve();
+ await assert.rejects(api.authorizeFeatureCommit(request),/denied/);
+ release();await assert.rejects(first,/ambiguous/);
+ await assert.rejects(api.authorizeFeatureCommit(request),/denied/);
+ assert.equal(calls,1);
+});

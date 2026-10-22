@@ -1,0 +1,4 @@
+# Linux x86_64 / CPython 3.12 wheel resolution; public PyPI SHA256 verified.
+# See artifacts.json for exact files, hashes, sources and resolution groups.
+hypothesis==6.169.0 --hash=sha256:e4cd63db1bb243c3e11f8dc36c3cd89def28f8c493cde3321ff036f443770b97
+sortedcontainers==2.4.0 --hash=sha256:a163dcaede0f1c021485e957a39245190e74249897e2ae4b2aa38595db237ee0

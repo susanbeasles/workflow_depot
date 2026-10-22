@@ -17,7 +17,8 @@ runs:
           else python3 "$S/result.py" --control API-SCHEMATHESIS --domain L --status NOT_APPLICABLE --reason "no API schema or web framework detected" --tool schemathesis; fi; exit 0; fi
         [ -n "${{ inputs.authorization_ref }}" ] || { python3 "$S/result.py" --control API-SCHEMATHESIS --domain L --status POLICY_UNAVAILABLE --reason "target without authorization_ref" --tool schemathesis; exit 0; }
         SV=$(python3 -c "import yaml;print(yaml.safe_load(open('$R'))['python_tools']['schemathesis'])")
-        pip install --disable-pip-version-check -q "schemathesis==$SV" >"$E/schemathesis-install.log" 2>&1 || { python3 "$S/result.py" --control API-SCHEMATHESIS --domain L --status TOOL_FAILURE --reason "pip install failed" --tool schemathesis; exit 0; }
+        PYTOOLS=$(python3 "$S/python_tool_install.py" --registry "$R" --tools schemathesis) 2>"$E/schemathesis-install.log" || { python3 "$S/result.py" --control API-SCHEMATHESIS --domain L --status TOOL_FAILURE --reason "hash-locked Python wheel provisioning unavailable or invalid" --tool schemathesis; exit 0; }
+        export PATH="$PYTOOLS:$PATH"
         timeout 1500 schemathesis run "${{ inputs.source_path }}/${{ inputs.schema_path }}" --url "${{ inputs.target_url }}" --checks all --max-examples 50 --workers 2 --report junit --report-junit-path "$E/schemathesis.junit.xml" >"$E/schemathesis.log" 2>&1; RC=$?
         python3 "$S/normalize.py" --tool junit --in "$E/schemathesis.junit.xml" --out "$E/schemathesis.findings.json"; NF="$E/schemathesis.findings.json"
         case $RC in 0) ST=PASS;; 1) ST=FAIL;; *) ST=TOOL_FAILURE;; esac; grep -q '"parse_error": "' "$NF" 2>/dev/null && ST=TOOL_FAILURE

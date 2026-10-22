@@ -185,8 +185,8 @@ The admission Worker URL and audience come from workflow inputs sourced from the
 resolve-release-context → verify-source (signed tag/commit matches) → build-worker-bundle (per worker target)
 → bundle-migrations → write-authorization-policy → checksum-bundles → assemble-release (release.zip)
 → write-release-manifest → verify-release (independent re-check of every digest, zip hygiene: no symlinks,
-no absolute/`..` paths, bomb ratio ≤ 100×, ≤ 20k entries) → attest-release (cosign sign-blob OIDC +
-`actions/attest-build-provenance`) → publish-release (GitHub Release assets, write-once: fail if tag release exists)
+no absolute/`..` paths, bomb ratio ≤ 100×, ≤ 20k entries) → attest-release (cosign sign-blob OIDC; no GitHub
+artifact attestations) → publish-release (GitHub Release assets, write-once: fail if tag release exists)
 → publish-release-objects (R2, `If-None-Match: *` on every key; temp key then finalize `release.meta.json` last).
 Each step is one composite action in `workflow_depot/.github/actions/<name>/action.yml`, single concern,
 inputs/outputs only, no secrets except the publish steps, all `uses:` pinned to 40-hex SHAs.
@@ -272,7 +272,7 @@ segment); `workingDirectory` and `image.context` may also be exactly `.`. Comman
 | `scripts.lint`, `scripts.typecheck`, `scripts.test`, `scripts.build` | npm | npm script name | all four required; `test` must write the coverage summary; `build` is the one production build |
 | `rebuild` | npm, optional | array of npm package names, 0 to 16, unique | the only packages whose install scripts run (`npm rebuild <names>` after `npm ci --ignore-scripts`), e.g. `esbuild`, `workerd` |
 | `coverage.summary` | npm | path ending `.json` | Istanbul `json-summary` file the test script writes; `total.lines.pct` must reach the profile threshold |
-| `build.outputDirectory` | npm | path | the build output, packaged deterministically, digested, attested (stage 4) |
+| `build.outputDirectory` | npm | path | the build output, packaged deterministically, digested and independently re-hashed (stage 4) |
 | `image` | both | `null` or `{dockerfile, context}` | image recipe; terraform: must be `null`; npm: validates, then fails closed until the image build and attest action exists |
 | `targets.applicationManifest` | npm | path ending `.json`, or `null` | `application-deployment/v1` (section 1) for stage 6 `release.yml`; `null`: no release |
 | `targets.deploy` | npm | array of target ids (`^[a-z0-9-]{1,64}$`), 0 to 32, unique | stage 7: targets registered with the central deployment receiver (`request-deployment.yml`); non-empty requires `applicationManifest` |

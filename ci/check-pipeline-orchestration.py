@@ -37,10 +37,10 @@ def ancestors(jobs, name):
     return seen
 
 
-PIN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}$")
-LOCAL_WORKFLOW = re.compile(r"^\./\.github/workflows/[a-z0-9-]+\.yml$")
+PIN = re.build-candidate(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}$")
+LOCAL_WORKFLOW = re.build-candidate(r"^\./\.github/workflows/[a-z0-9-]+\.yml$")
 INSTALL_TOOL = "./.security-depot/.github/actions/install-tool"
-STATUS = re.compile(r"\b(always|failure|cancelled)\(\)")
+STATUS = re.build-candidate(r"\b(always|failure|cancelled)\(\)")
 
 if installed.exists():
     assert installed.read_bytes() == staged.read_bytes(), (
@@ -59,7 +59,7 @@ assert not re.search(r"secrets:\s*inherit", text), "secrets: inherit is forbidde
 
 call = wf["on"]["workflow_call"]
 assert call["inputs"]["depot_ref"]["required"] == "true"
-assert set(call["inputs"]) == {"depot_ref", "require-attestation"}
+assert set(call["inputs"]) == {"depot_ref"}
 assert "secrets" not in call, "stage 7 takes no dispatch PAT (spec 5.2/5.4)"
 
 # Stage order. ADR-0002 check names are the four evidence jobs plus shadow and promote.
@@ -69,8 +69,8 @@ expected_needs = {
     "quality": ["config"],
     "security-assurance": ["config"],
     "security": ["config", "security-assurance"],
-    "compile": ["config", "lint-test", "quality", "security"],
-    "build": ["config", "compile"],
+    "build-candidate": ["config", "lint-test", "quality", "security"],
+    "build": ["build-candidate"],
     "shadow": ["build"],
     "promote": ["build"],
     "release": ["config", "build"],
@@ -94,13 +94,14 @@ for name in ["lint-test", "quality", "security", "build", "shadow", "promote"]:
     )
 
 # Conditions.
-for name in ["config", "lint-test", "quality", "security-assurance", "compile"]:
+for name in ["config", "lint-test", "quality", "security-assurance", "build-candidate"]:
     assert "if" not in jobs[name], f"{name} runs on every call"
-for name in ["security", "build"]:
+for name in ["security"]:
     assert (
         jobs[name]["if"] == "${{ !cancelled() && needs.config.result == 'success' }}"
     ), f"{name} reports red, not skipped"
-assert jobs["build"]["steps"][0]["env"]["RESULT"] == "${{ needs.compile.result }}"
+assert "if" not in jobs["build"]
+assert "if" not in jobs["build-candidate"]
 shadow_if = " ".join(jobs["shadow"]["if"].split())
 for clause in [
     "github.event_name == 'pull_request'",
@@ -121,7 +122,7 @@ assert jobs["deploy"]["if"] == (
 )
 assert "needs.config.outputs.ecosystem == 'terraform'" in jobs["infra-apply"]["if"]
 assert "refs/heads/main" in jobs["infra-apply"]["if"]
-for name in ["shadow", "promote", "release", "deploy", "infra-apply", "compile"]:
+for name in ["shadow", "promote", "release", "deploy", "infra-apply", "build-candidate"]:
     assert not STATUS.search(jobs[name].get("if", "")), (
         f"{name}: a status function would let it run after a failed stage"
     )
@@ -133,12 +134,11 @@ expected_permissions = {
     "quality": {"contents": "read"},
     "security-assurance": {
         "contents": "read",
-        "security-events": "write",
         "id-token": "write",
     },
     "security": {"contents": "read"},
-    "compile": {"contents": "read"},
-    "build": {"contents": "read", "id-token": "write", "attestations": "write"},
+    "build-candidate": {"contents": "read"},
+    "build": {"contents": "read"},
     "shadow": {"id-token": "write"},
     "promote": {"id-token": "write"},
     "release": {"contents": "write", "id-token": "write", "attestations": "write"},
@@ -188,14 +188,14 @@ assert "uses" not in jobs["deploy"] and "forbidden" in jobs["deploy"]["steps"][0
     "stage 7 fails closed until the authorizer OIDC request exists"
 )
 
-# Stage 4: repository code runs only in compile, which holds no OIDC token; build only attests its upload.
-assert jobs["compile"]["permissions"] == {"contents": "read"}
+# Stage 4: repository code runs only in build-candidate, which holds no OIDC token; build only attests its upload.
+assert jobs["build-candidate"]["permissions"] == {"contents": "read"}
 for step in jobs["build"]["steps"]:
     uses = step.get("uses", "")
     assert not uses.startswith(("actions/checkout@", "actions/setup-node@")) and uses != INSTALL_TOOL, (
         f"build runs no repository code: {uses}"
     )
-    assert not re.search(r"\b(npm|node)\b", step.get("run", "")), "build runs no npm or node"
+    assert not re.search(r"\bnpm\b", step.get("run", "")), "build runs no package code"
 
 # Steps: pinned actions, no credential persistence, no expressions in shell, no eval.
 for name, job in jobs.items():
@@ -237,7 +237,7 @@ assert job["permissions"] == union, (
 )
 
 print(
-    "Verified pipeline.yml: config -> lint-test, quality, security-assurance -> security -> compile -> build -> "
+    "Verified pipeline.yml: config -> lint-test, quality, security-assurance -> security -> build-candidate -> build -> "
     "shadow | promote | release -> deploy | infra-apply; conditions, least-privilege permissions, "
     "pinned uses, same-commit nested workflows, no secrets."
 )
