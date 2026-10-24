@@ -275,7 +275,9 @@ segment); `workingDirectory` and `image.context` may also be exactly `.`. Comman
 | `build.outputDirectory` | npm | path | the build output, packaged deterministically, digested and independently re-hashed (stage 4) |
 | `image` | both | `null` or `{dockerfile, context}` | image recipe; terraform: must be `null`; npm: validates, then fails closed until the image build and attest action exists |
 | `targets.applicationManifest` | npm | path ending `.json`, or `null` | `application-deployment/v1` (section 1) for stage 6 `release.yml`; `null`: no release |
-| `targets.deploy` | npm | array of target ids (`^[a-z0-9-]{1,64}$`), 0 to 32, unique | stage 7: targets registered with the central deployment receiver (`request-deployment.yml`); non-empty requires `applicationManifest` |
+| `targets.deploy` | npm | array of target ids, 0 to 32, unique | Stage 7 verifies these exact completed targets. Non-empty requires `applicationManifest`, `application`, and `environment`. The authorizer invokes the deployer privately; no dispatch credential. |
+| `targets.application` | npm with deploy targets | explicit application id, 2 to 40 characters | Must match the enrolled application and release manifest. |
+| `targets.environment` | npm with deploy targets | explicit environment id, 2 to 32 characters | Must match authorizer enrollment and deployment registry. |
 | `targets.stacks` | terraform | array of paths, 1 to 32, unique | Terraform roots the plan and apply cover |
 | `terraform.plan` | terraform | string | `terraform.plan` (stage 4 replacement) |
 | `terraform.apply` | terraform | string | `terraform.apply` (infra) or `root.apply` (infra-root) (stage 7 replacement) |
@@ -316,7 +318,7 @@ personal-control (Node Worker; `lint`, `test:coverage` and `deployment/applicati
   "coverage": { "summary": "coverage/coverage-summary.json" },
   "build": { "outputDirectory": "dist" },
   "image": null,
-  "targets": { "applicationManifest": "deployment/application.json", "deploy": ["personal-control"] }
+  "targets": { "applicationManifest": "deployment/application.json", "deploy": ["personal-control"], "application": "personal-control", "environment": "production" }
 }
 ```
 

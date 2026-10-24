@@ -43,11 +43,11 @@ After that PR merges, for each repository:
 | `security-assurance` | 3 | `pipeline / security-assurance / ...` | every run | config | `contents: read`, `id-token: write` | `.github/workflows/security-assurance.yml`: admission, analysis, final gate, signed evidence |
 | `security` | 3 | `pipeline / security` | unless cancelled | config, security-assurance | `contents: read` | security-assurance decision must be `PASS`; gitleaks (tree and commit range), `npm audit` |
 | `build-candidate` | 4 | `pipeline / build-candidate` | every run | config and the three above | `contents: read` | working-directory check, one build, package, `sha256`, upload, CycloneDX and SPDX SBOM; no OIDC token while repository scripts run |
-| `build` | 4 | `pipeline / build` | default success dependency gating | build-candidate | `contents: read` | immutable artifact ID download and independent digest; no candidate execution or GitHub attestations |
+| `build` | 4 | `pipeline / build` | default success dependency gating | build-candidate | `contents: read`, `id-token: write`, `attestations: write` | immutable artifact ID download, independent digest and pinned GitHub provenance producer; no candidate execution |
 | `shadow` | 5 | `pipeline / shadow` | non-draft `pull_request` into `main` from this repository | build | `id-token: write` | `actions/request-shadow` |
 | `promote` | 5 | `pipeline / promote` | `push` to `shadow/pr-*` | build | `id-token: write` | `actions/request-promotion` with the artifact digest |
 | `release` | 6 | `pipeline / release / ...` | `push` to `main` or a `v*` tag, `targets.applicationManifest` set | config, build | `contents: write`, `id-token: write` | `.github/workflows/release.yml` |
-| `deploy` | 7 | `pipeline / deploy` | stage 6 released on `main`, `targets.deploy` not empty | config, release | none | fails closed: the authorizer OIDC `deploy` request is not wired and the PAT dispatch is forbidden |
+| `deploy` | 7 | `pipeline / deploy` | stage 6 released on `main`, `targets.deploy` not empty | config, release | `contents: read`, `id-token: write` | one admission request, then bounded authenticated status polling; exact release, source, manifest and target versions required |
 | `infra-apply` | 7 | `pipeline / infra-apply` | terraform, `push` to `main` | config, build | none | fails closed: not wired |
 
 For `ecosystem: terraform`, the first step of `lint-test` and `build-candidate` fails closed (no pinned OpenTofu; no
@@ -109,12 +109,10 @@ No secrets (never `inherit`, no named secret). Everything comes from
 
 Candidate install, lifecycle, build, package and SBOM work runs in `build-candidate` with contents read only.
 The required `pipeline / build` check runs on a fresh runner, downloads the immutable same-run artifact ID and
-independently hashes one regular file without executing it. Both jobs retain default success dependency gating.
+independently hashes one regular file without executing it, then generates GitHub build provenance for that digest. Both jobs retain default success dependency gating.
 The public authorizer contract remains the four checks lint-test, quality, security and build.
 
-This generic pipeline produces no GitHub artifact attestation. Cosign release signatures remain a separate
-release mechanism. A caller whose enrolled authorizer policy requires generic pipeline provenance remains
-fail closed until a compatible producer is qualified; this rebase does not change that policy.
+The isolated build job uses `actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d` to publish provenance for the independently verified digest. The caller grants `attestations: write`; repository build jobs receive no signing permission. Cosign release signatures remain separate. Live producer/verifier qualification is still required before promotion policy can be enabled. Private repository use requires a GitHub plan supporting private artifact attestations.
 
 ## Embedded scripts
 
@@ -137,7 +135,7 @@ node pipeline/embed.mjs --check  # exit 1 if pipeline.yml is stale
 ## Not wired here
 
 See docs/pipeline.md "Gaps and open questions": the terraform stage 1, 4 and 7 requests, the image path, private
-sourcemaps, a separate cosign signature on the build artifact, and stage 7 through the authorizer with OIDC.
+sourcemaps, a separate cosign signature on the build artifact, and release-consumer compatibility. Stage 7 now uses the authorizer with OIDC; commissioning blockers and the exact contract are recorded in `docs/pipeline-commissioning.md`.
 **Runner telemetry** (`actions/runner-telemetry`, ADR-0001 section 3) is built separately. A comment in
 `lint-test` marks where it goes: first in each job, once it is reviewed and pinned.
 
@@ -167,3 +165,5 @@ zizmor --offline --no-config pipeline/pipeline.yml pipeline/caller.yml
 
 The check-name test reads the authorizer policy from `../authorizer/policy/actions.json`, or from
 `AUTHORIZER_POLICY`, and skips with a message when neither is present. YAML is parsed with python3 and PyYAML.
+
+The build job requires a nonempty repository `attestation-id` from the pinned producer and exposes the attestation ID and URL as evidence. `create-storage-record: false` disables optional OCI registry metadata records; it does not disable GitHub repository attestation publication. Promotion consumes repository attestations through the Authorizer.
