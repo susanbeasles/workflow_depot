@@ -76,6 +76,8 @@ jobs:
       release: ${{ steps.read.outputs.release }}
       application_manifest: ${{ steps.read.outputs.application_manifest }}
       deploy_targets: ${{ steps.read.outputs.deploy_targets }}
+      deploy_application: ${{ steps.read.outputs.deploy_application }}
+      deploy_environment: ${{ steps.read.outputs.deploy_environment }}
       terraform_plan: ${{ steps.read.outputs.terraform_plan }}
       terraform_apply: ${{ steps.read.outputs.terraform_apply }}
     steps:
@@ -1054,11 +1056,11 @@ jobs:
           overwrite: false
 
   build:
-    name: build # isolated re-hash of the uploaded artifact; no GitHub attestations (releases are cosign-signed)
+    name: build # isolated artifact verification and provenance; no repository code executes here
     needs: build-candidate
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    permissions: {contents: read}
+    permissions: {contents: read, id-token: write, attestations: write}
     outputs:
       artifact_digest: ${{ steps.digest.outputs.artifact_digest }}
     steps:
@@ -1086,6 +1088,13 @@ jobs:
           stream.on('error', () => { process.exitCode = 1; });
           stream.on('data', chunk => hash.update(chunk));
           stream.on('end', () => fs.appendFileSync(process.env.GITHUB_OUTPUT, `artifact_digest=sha256:${hash.digest('hex')}\n`));
+      - name: Attest the independently verified artifact digest
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: pipeline-artifact
+          subject-digest: ${{ steps.digest.outputs.artifact_digest }}
+          push-to-registry: false
+          create-storage-record: false
 
   shadow:
     name: shadow # stage 5 (pull request); the check name is `pipeline / shadow`; the authorizer requires it exactly
@@ -1316,22 +1325,114 @@ jobs:
       application_manifest: ${{ needs.config.outputs.application_manifest }}
 
   deploy:
-    # Stage 7, only after stage 6 published a release on main. Spec 5.2/5.4: a deployment is requested from the
-    # authorizer with this run's OIDC token; a dispatch PAT is forbidden. workflow_depot has no action for that
-    # request yet (the request format lives in the authorizer), so a repository that lists deploy targets gets a
-    # red stage 7 with this reason instead of a PAT path. Repositories without deploy targets skip it.
+    # Stage 7: one admission attempt, bounded authenticated terminal readback.
     needs: [config, release]
     if: github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true' && needs.config.outputs.deploy_targets != '[]'
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions: {}
+    timeout-minutes: 35
+    environment: ${{ needs.config.outputs.deploy_environment }}
+    permissions:
+      id-token: write
+    outputs:
+      deployment_id: ${{ steps.request.outputs.deployment_id }}
+      phase: ${{ steps.request.outputs.phase }}
     steps:
-      - name: deploy request to the authorizer (not wired)
-        env:
-          TARGETS: ${{ needs.config.outputs.deploy_targets }}
+      - name: Find the workflow_depot commit this pipeline runs at
+        id: route
+        shell: node {0}
+        # embedded: pipeline/scripts/workflow-sha.cjs
         run: |
-          echo "::error title=deploy::stage 7 for $TARGETS is an OIDC deploy request to the authorizer; workflow_depot has no action for that request yet, and the PAT dispatch (request-deployment.yml) is forbidden by spec 5.2/5.4. The release is published; see docs/pipeline.md, open questions."
-          exit 1
+          'use strict';
+          // pipeline/scripts/workflow-sha.cjs: find the workflow_depot commit this reusable workflow runs at.
+          // Embedded byte for byte in pipeline.yml (shell: node {0}); pipeline/test checks that the two match.
+          // It reads this job's OIDC token, decodes the job_workflow_sha claim and writes `sha=<40 hex>` to
+          // GITHUB_OUTPUT. The signature is not checked: this only picks which commit to check out, and the
+          // authorizer verifies its own token. The token's audience is accepted by no service, so a leaked
+          // token is worthless. The token is never printed.
+          const { appendFileSync } = require('node:fs');
+
+          const AUDIENCE = 'workflow-depot-route';
+          const WORKFLOW = 'susanbeasles/workflow_depot/.github/workflows/pipeline.yml@';
+          const SHA = /^[0-9a-f]{40}$/;
+
+          class RouteError extends Error {}
+
+          function decodeClaims(jwt) {
+            const parts = typeof jwt === 'string' ? jwt.split('.') : [];
+            if (parts.length !== 3 || !/^[A-Za-z0-9_-]+$/.test(parts[1])) throw new RouteError('OIDC token is not a JWT');
+            let claims;
+            try {
+              claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+            } catch {
+              throw new RouteError('OIDC token payload is not JSON');
+            }
+            if (claims === null || typeof claims !== 'object' || Array.isArray(claims)) throw new RouteError('OIDC token payload is not an object');
+            return claims;
+          }
+
+          function workflowSha(claims) {
+            const ref = claims.job_workflow_ref;
+            if (typeof ref !== 'string' || !ref.startsWith(WORKFLOW) || ref.length === WORKFLOW.length) {
+              throw new RouteError('job_workflow_ref is not susanbeasles/workflow_depot pipeline.yml: run this job only inside the reusable pipeline');
+            }
+            const sha = claims.job_workflow_sha;
+            if (typeof sha !== 'string' || !SHA.test(sha)) throw new RouteError('job_workflow_sha is missing or not 40 lowercase hex');
+            return sha;
+          }
+
+          async function oidcToken(env, fetchImpl) {
+            const url = env.ACTIONS_ID_TOKEN_REQUEST_URL;
+            const bearer = env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+            if (!url || !bearer) throw new RouteError('no OIDC token available: the job needs `permissions: id-token: write`');
+            const target = new URL(url);
+            target.searchParams.set('audience', AUDIENCE);
+            const res = await fetchImpl(target, { headers: { authorization: `bearer ${bearer}` }, redirect: 'error', signal: AbortSignal.timeout(15000) });
+            if (res.status !== 200) throw new RouteError(`OIDC token request failed with ${res.status}`);
+            const text = await res.text();
+            if (text.length > 16384) throw new RouteError('OIDC token response too large');
+            let value;
+            try {
+              value = JSON.parse(text).value;
+            } catch {
+              throw new RouteError('OIDC token response is not JSON');
+            }
+            if (typeof value !== 'string') throw new RouteError('OIDC token response has no token');
+            return value;
+          }
+
+          async function main(env = process.env, fetchImpl = fetch, log = console.log) {
+            const sha = workflowSha(decodeClaims(await oidcToken(env, fetchImpl)));
+            if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, `sha=${sha}\n`);
+            log(`workflow_depot pipeline.yml runs at ${sha}`);
+            return sha;
+          }
+
+          module.exports = { AUDIENCE, WORKFLOW, RouteError, decodeClaims, workflowSha, oidcToken, main };
+
+          if (require.main === module) {
+            main().catch((error) => {
+              console.log(`::error title=workflow-sha::${error instanceof RouteError ? error.message : 'unexpected failure'}`);
+              process.exitCode = 1;
+            });
+          }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: susanbeasles/workflow_depot
+          ref: ${{ steps.route.outputs.sha }}
+          path: .workflow-depot
+          persist-credentials: false
+      - name: Request deployment and verify terminal release identity
+        id: request
+        env:
+          DEPOT_SHA: ${{ steps.route.outputs.sha }}
+          INPUT_APPLICATION: ${{ needs.config.outputs.deploy_application }}
+          INPUT_ENVIRONMENT: ${{ needs.config.outputs.deploy_environment }}
+          INPUT_TARGETS: ${{ needs.config.outputs.deploy_targets }}
+          INPUT_RELEASE_TAG: ${{ needs.release.outputs.releaseTag }}
+          INPUT_MANIFEST_SHA256: ${{ needs.release.outputs.manifestSha256 }}
+        run: |
+          test "$(git -C .workflow-depot rev-parse HEAD)" = "$DEPOT_SHA"
+          node .workflow-depot/actions/request-deploy/main.mjs
 
   infra-apply:
     name: infra-apply # stage 7 for terraform repositories: terraform.apply or root.apply in the runner

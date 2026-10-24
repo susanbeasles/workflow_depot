@@ -49,7 +49,7 @@ concurrency: {group: 'pipeline-${{ github.ref }}', cancel-in-progress: "${{ gith
 jobs:
   pipeline:
     uses: susanbeasles/workflow_depot/.github/workflows/pipeline.yml@0000000000000000000000000000000000000000 # REPLACE: reviewed workflow_depot SHA
-    permissions: {contents: write, id-token: write}
+    permissions: {contents: write, id-token: write, attestations: write}
     with: {depot_ref: '0000000000000000000000000000000000000000'}
 ```
 

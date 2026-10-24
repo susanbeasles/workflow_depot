@@ -57,13 +57,19 @@ function validateNpm(c){
  req(c.coverage.summary.endsWith('.json'),'coverage.summary: expected an Istanbul json-summary file (.json)');
  keys(c.build,['outputDirectory'],[],'build');
  path(c.build.outputDirectory,'build.outputDirectory');
- keys(c.targets,['applicationManifest','deploy'],[],'targets');
+ keys(c.targets,['applicationManifest','deploy'],['application','environment'],'targets');
  if(c.targets.applicationManifest!==null){
   path(c.targets.applicationManifest,'targets.applicationManifest');
   req(c.targets.applicationManifest.endsWith('.json'),'targets.applicationManifest: expected a .json file');
  }
  list(c.targets.deploy,v=>TARGET_ID.test(v),{max:LIMITS.deploy},'targets.deploy');
  req(c.targets.deploy.length===0||c.targets.applicationManifest!==null,'targets.deploy: deploy targets require targets.applicationManifest (stage 7 runs only after a stage 6 release)');
+ if(c.targets.deploy.length>0){
+  req(typeof c.targets.application==='string'&&/^[a-z][a-z0-9-]{0,38}[a-z0-9]$/.test(c.targets.application),'targets.application: deploy targets require an explicit application identity');
+  req(typeof c.targets.environment==='string'&&/^[a-z][a-z0-9-]{0,30}[a-z0-9]$/.test(c.targets.environment),'targets.environment: deploy targets require an explicit environment identity');
+ }else{
+  req(!Object.hasOwn(c.targets,'application')&&!Object.hasOwn(c.targets,'environment'),'targets: application and environment require deploy targets');
+ }
 }
 
 function validateTerraform(c){
@@ -113,6 +119,8 @@ export function configOutputs(c){
   release:String(npm&&c.targets.applicationManifest!==null),
   application_manifest:npm&&c.targets.applicationManifest!==null?c.targets.applicationManifest:'',
   deploy_targets:JSON.stringify(npm?c.targets.deploy:[]),
+  deploy_application:npm?(c.targets.application??''):'',
+  deploy_environment:npm?(c.targets.environment??''):'',
   terraform_plan:npm?'':c.terraform.plan,
   terraform_apply:npm?'':c.terraform.apply,
   stacks:JSON.stringify(npm?[]:c.targets.stacks),

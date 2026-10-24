@@ -103,12 +103,25 @@ test('outputs: flat strings, profile threshold, release and deploy derived from 
  assert.equal(out.rebuild,'esbuild workerd');
  assert.equal(out.release,'true');
  assert.equal(out.deploy_targets,'["personal-control"]');
+ assert.equal(out.deploy_application,'personal-control');
+ assert.equal(out.deploy_environment,'production');
  assert.equal(out.image,'false');
  const strict=npm();strict.policyProfile='strict';assert.equal(configOutputs(strict).coverage_min,'90');
  const tf=configOutputs(terraform());
  assert.equal(tf.ecosystem,'terraform');assert.equal(tf.release,'false');assert.equal(tf.deploy_targets,'[]');
  assert.equal(tf.terraform_apply,'terraform.apply');assert.equal(tf.node_version,'');
  assert.equal(JSON.parse(tf.stacks).length,5);
+});
+
+test('deploy enrollment identities must be explicit, bounded and cannot inject outputs',()=>{
+ for(const field of ['application','environment']){
+  for(const bad of [undefined,'x','../other','production\nevil=x',42]){
+   const c=example('personal-control');
+   if(bad===undefined)delete c.targets[field];else c.targets[field]=bad;
+   denied(c,new RegExp(`targets.${field}`));
+  }
+ }
+ const c=npm();c.targets.environment='production';denied(c,/require deploy targets/);
 });
 
 test('an image recipe validates but fails closed until the image stage exists',()=>{

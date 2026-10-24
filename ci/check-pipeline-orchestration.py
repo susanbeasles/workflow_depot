@@ -37,10 +37,10 @@ def ancestors(jobs, name):
     return seen
 
 
-PIN = re.build-candidate(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}$")
-LOCAL_WORKFLOW = re.build-candidate(r"^\./\.github/workflows/[a-z0-9-]+\.yml$")
+PIN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}$")
+LOCAL_WORKFLOW = re.compile(r"^\./\.github/workflows/[a-z0-9-]+\.yml$")
 INSTALL_TOOL = "./.security-depot/.github/actions/install-tool"
-STATUS = re.build-candidate(r"\b(always|failure|cancelled)\(\)")
+STATUS = re.compile(r"\b(always|failure|cancelled)\(\)")
 
 if installed.exists():
     assert installed.read_bytes() == staged.read_bytes(), (
@@ -138,11 +138,11 @@ expected_permissions = {
     },
     "security": {"contents": "read"},
     "build-candidate": {"contents": "read"},
-    "build": {"contents": "read"},
+    "build": {"contents": "read", "id-token": "write", "attestations": "write"},
     "shadow": {"id-token": "write"},
     "promote": {"id-token": "write"},
-    "release": {"contents": "write", "id-token": "write", "attestations": "write"},
-    "deploy": {},
+    "release": {"contents": "write", "id-token": "write"},
+    "deploy": {"id-token": "write"},
     "infra-apply": {},
 }
 for name, job in jobs.items():
@@ -184,9 +184,17 @@ for name, job in jobs.items():
 for name in ["security-assurance", "release", "deploy"]:
     assert "secrets" not in jobs[name], f"{name}: no secrets"
 assert "secrets." not in text, "the pipeline reads no secret"
-assert "uses" not in jobs["deploy"] and "forbidden" in jobs["deploy"]["steps"][0]["run"], (
-    "stage 7 fails closed until the authorizer OIDC request exists"
-)
+deploy = jobs["deploy"]
+assert deploy["environment"] == "${{ needs.config.outputs.deploy_environment }}"
+assert len(deploy["steps"]) == 3
+request = deploy["steps"][-1]
+assert "node .workflow-depot/actions/request-deploy/main.mjs" in request["run"]
+assert request["env"]["INPUT_RELEASE_TAG"] == "${{ needs.release.outputs.releaseTag }}"
+assert request["env"]["INPUT_MANIFEST_SHA256"] == "${{ needs.release.outputs.manifestSha256 }}"
+attest = [s for s in jobs["build"]["steps"] if s.get("uses", "").startswith("actions/attest@")]
+assert len(attest) == 1
+assert attest[0]["with"]["subject-digest"] == "${{ steps.digest.outputs.artifact_digest }}"
+assert attest[0]["with"]["subject-name"] == "pipeline-artifact"
 
 # Stage 4: repository code runs only in build-candidate, which holds no OIDC token; build only attests its upload.
 assert jobs["build-candidate"]["permissions"] == {"contents": "read"}

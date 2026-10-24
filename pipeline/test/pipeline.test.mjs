@@ -121,11 +121,11 @@ test('every job: explicit minimal permissions; every runner job ubuntu-24.04 wit
     'security-assurance': { contents: 'read', 'id-token': 'write' },
     security: { contents: 'read' },
     'build-candidate': { contents: 'read' },
-    build: { contents: 'read' },
+    build: { contents: 'read', 'id-token': 'write', attestations: 'write' },
     shadow: { 'id-token': 'write' },
     promote: { 'id-token': 'write' },
     release: { contents: 'write', 'id-token': 'write' },
-    deploy: {},
+    deploy: { 'id-token': 'write' },
     'infra-apply': {},
   };
   for (const [job, def] of Object.entries(wf.jobs)) {
@@ -150,7 +150,7 @@ test('every uses: is pinned to a full 40-hex SHA with a version comment, or is a
 });
 
 test('only the allowed actions are used', () => {
-  const ok = new Set(['actions/checkout', 'actions/setup-node', 'actions/upload-artifact', 'actions/download-artifact', 'actions/attest-build-provenance', INSTALL_TOOL]);
+  const ok = new Set(['actions/checkout', 'actions/setup-node', 'actions/upload-artifact', 'actions/download-artifact', 'actions/attest', INSTALL_TOOL]);
   for (const { job, step } of allSteps()) if (step.uses !== undefined) assert.ok(ok.has(step.uses.split('@')[0]), `${job}: ${step.uses}`);
   const tools = allSteps().filter(({ step }) => step.uses === INSTALL_TOOL);
   assert.deepEqual(tools.map(({ job, step }) => [job, step.with.tool]), [['build-candidate', 'syft']]);
@@ -169,7 +169,7 @@ test('no ${{ }} expression inside any run: block (template injection)', () => {
   }
 });
 
-test('inputs: depot_ref only; no GitHub attestations or secrets', () => {
+test('inputs: depot_ref only; no attestation bypass or secrets', () => {
  const call=wf.on.workflow_call;
  assert.deepEqual(Object.keys(call.inputs),['depot_ref']);
  assert.equal(call.inputs.depot_ref.required,'true');
@@ -273,7 +273,7 @@ test('shadow and promote run the request actions at the workflow_depot commit pi
 test('candidate builds without signing privileges; build hashes the immutable same-run artifact', () => {
  const candidate=wf.jobs['build-candidate'],build=wf.jobs.build;
  assert.deepEqual(candidate.permissions,{contents:'read'});
- assert.deepEqual(build.permissions,{contents:'read'});
+ assert.deepEqual(build.permissions,{contents:'read','id-token':'write',attestations:'write'});
  assert.deepEqual(needsOf('build'),['build-candidate']);
  assert.deepEqual(needsOf('build-candidate'),['config','lint-test','quality','security']);
  assert.equal(candidate.if,undefined);assert.equal(build.if,undefined);
@@ -293,7 +293,12 @@ test('candidate builds without signing privileges; build hashes the immutable sa
  assert.equal(download.with['artifact-ids'],'${{ needs.build-candidate.outputs.artifact_id }}');
  assert.equal(download.with['run-id'],undefined);assert.equal(download.with.repository,undefined);
  assert.equal(build.outputs.artifact_digest,'${{ steps.digest.outputs.artifact_digest }}');
- assert.ok(!raw.includes('actions/attest-build-provenance@'));
+ const attestation=build.steps.find(s=>s.uses?.startsWith('actions/attest@'));
+ assert.ok(attestation);
+ assert.equal(attestation.with['subject-digest'],'${{ steps.digest.outputs.artifact_digest }}');
+ assert.equal(attestation.with['subject-name'],'pipeline-artifact');
+ assert.equal(attestation.with['push-to-registry'],'false');
+ assert.equal(attestation.with['create-storage-record'],'false');
  assert.equal(wf.on.workflow_call.inputs['require-attestation'],undefined);
 });
 
@@ -310,15 +315,26 @@ test('every job that uses the working directory checks it right after checkout, 
   }
 });
 
-test('stage 7 fails closed: no dispatch PAT, no request-deployment.yml, red with the reason when deploy targets exist', () => {
+test('stage 7 uses only the pinned depot client, exact release outputs and narrow OIDC privilege', () => {
   const deploy = wf.jobs.deploy;
   assert.equal(deploy.uses, undefined);
   assert.equal(deploy.secrets, undefined);
-  assert.deepEqual(deploy.permissions, {});
-  assert.equal(deploy.steps.length, 1);
-  assert.match(deploy.steps[0].run, /PAT dispatch \(request-deployment\.yml\) is forbidden/);
-  assert.match(deploy.steps[0].run, /exit 1\n$/);
-  assert.ok(!raw.includes('request-deployment.yml\n') && !/uses: \.\/\.github\/workflows\/request-deployment/.test(raw));
+  assert.deepEqual(deploy.permissions, { 'id-token': 'write' });
+  assert.equal(deploy.environment, '${{ needs.config.outputs.deploy_environment }}');
+  assert.equal(deploy.steps.length, 3);
+  assert.equal(deploy.steps[0].run, readFileSync(path.join(SCRIPTS, 'workflow-sha.cjs'), 'utf8'));
+  assert.equal(deploy.steps[1].with.repository, 'susanbeasles/workflow_depot');
+  assert.equal(deploy.steps[1].with.ref, '${{ steps.route.outputs.sha }}');
+  const request=deploy.steps[2];
+  assert.equal(request.env.INPUT_RELEASE_TAG,'${{ needs.release.outputs.releaseTag }}');
+  assert.equal(request.env.INPUT_MANIFEST_SHA256,'${{ needs.release.outputs.manifestSha256 }}');
+  assert.equal(request.env.INPUT_APPLICATION,'${{ needs.config.outputs.deploy_application }}');
+  assert.equal(request.env.INPUT_ENVIRONMENT,'${{ needs.config.outputs.deploy_environment }}');
+  assert.equal(request.env.INPUT_TARGETS,'${{ needs.config.outputs.deploy_targets }}');
+  assert.match(request.run,/git -C \.workflow-depot rev-parse HEAD/);
+  assert.match(request.run,/node \.workflow-depot\/actions\/request-deploy\/main\.mjs/);
+  assert.ok(Number(deploy['timeout-minutes'])>30);
+  assert.ok(!/uses: \.\/\.github\/workflows\/request-deployment/.test(raw));
 });
 
 test('quality and security run their tools from pinned, checksum-verified downloads', () => {
@@ -364,7 +380,7 @@ test('caller template: triggers, permissions {}, job id pipeline, depot_ref equa
   assert.deepEqual(job.with, { depot_ref: pinned[1] });
   assert.equal(job.secrets, undefined, 'the caller passes no secret');
   // The union of what the jobs inside declare; each job keeps only its own grant.
-  assert.deepEqual(job.permissions, { contents: 'write', 'id-token': 'write' });
+  assert.deepEqual(job.permissions, { contents: 'write', 'id-token': 'write', attestations: 'write' });
   const union = {};
   const rank = { read: 1, write: 2 };
   for (const def of Object.values(wf.jobs)) for (const [scope, level] of Object.entries(def.permissions ?? {})) if ((rank[level] ?? 0) > (rank[union[scope]] ?? 0)) union[scope] = level;

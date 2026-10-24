@@ -43,4 +43,8 @@ test('required build check hashes immutable same-run data on a fresh runner', ()
   assert.ok(!download.with['run-id']);
   assert.ok(!download.with.repository);
   assert.equal(signer.outputs.artifact_digest, '${{ steps.digest.outputs.artifact_digest }}');
+  assert.deepEqual(signer.permissions, {contents:'read','id-token':'write',attestations:'write'});
+  const attest=signer.steps.find(s => s.uses?.startsWith('actions/attest@'));
+  assert.equal(attest.with['subject-digest'], '${{ steps.digest.outputs.artifact_digest }}');
+  assert.equal(attest.with['subject-name'], 'pipeline-artifact');
 });
