@@ -9,5 +9,5 @@
   "coverage": { "summary": "coverage/coverage-summary.json" },
   "build": { "outputDirectory": "dist" },
   "image": null,
-  "targets": { "applicationManifest": "deployment/application.json", "deploy": ["personal-control"] }
+  "targets": { "applicationManifest": "deployment/application.json", "deploy": ["personal-control"], "application": "personal-control", "environment": "production" }
 }
