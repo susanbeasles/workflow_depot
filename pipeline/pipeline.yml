@@ -1063,6 +1063,8 @@ jobs:
     permissions: {contents: read, id-token: write, attestations: write}
     outputs:
       artifact_digest: ${{ steps.digest.outputs.artifact_digest }}
+      attestation_id: ${{ steps.attest.outputs.attestation-id }}
+      attestation_url: ${{ steps.attest.outputs.attestation-url }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -1089,12 +1091,18 @@ jobs:
           stream.on('data', chunk => hash.update(chunk));
           stream.on('end', () => fs.appendFileSync(process.env.GITHUB_OUTPUT, `artifact_digest=sha256:${hash.digest('hex')}\n`));
       - name: Attest the independently verified artifact digest
+        id: attest
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
           subject-name: pipeline-artifact
           subject-digest: ${{ steps.digest.outputs.artifact_digest }}
           push-to-registry: false
           create-storage-record: false
+      - name: Require repository attestation publication
+        env:
+          ATTESTATION_ID: ${{ steps.attest.outputs.attestation-id }}
+        run: |
+          test -n "$ATTESTATION_ID" || { echo '::error::GitHub did not return a persisted attestation ID'; exit 1; }
 
   shadow:
     name: shadow # stage 5 (pull request); the check name is `pipeline / shadow`; the authorizer requires it exactly
@@ -1332,6 +1340,7 @@ jobs:
     timeout-minutes: 35
     environment: ${{ needs.config.outputs.deploy_environment }}
     permissions:
+      contents: read # read the pinned workflow_depot client; never persist checkout credentials
       id-token: write
     outputs:
       deployment_id: ${{ steps.request.outputs.deployment_id }}

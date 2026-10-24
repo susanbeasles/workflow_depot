@@ -142,7 +142,7 @@ expected_permissions = {
     "shadow": {"id-token": "write"},
     "promote": {"id-token": "write"},
     "release": {"contents": "write", "id-token": "write"},
-    "deploy": {"id-token": "write"},
+    "deploy": {"contents": "read", "id-token": "write"},
     "infra-apply": {},
 }
 for name, job in jobs.items():

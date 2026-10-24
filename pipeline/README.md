@@ -47,7 +47,7 @@ After that PR merges, for each repository:
 | `shadow` | 5 | `pipeline / shadow` | non-draft `pull_request` into `main` from this repository | build | `id-token: write` | `actions/request-shadow` |
 | `promote` | 5 | `pipeline / promote` | `push` to `shadow/pr-*` | build | `id-token: write` | `actions/request-promotion` with the artifact digest |
 | `release` | 6 | `pipeline / release / ...` | `push` to `main` or a `v*` tag, `targets.applicationManifest` set | config, build | `contents: write`, `id-token: write` | `.github/workflows/release.yml` |
-| `deploy` | 7 | `pipeline / deploy` | stage 6 released on `main`, `targets.deploy` not empty | config, release | `id-token: write` | one admission request, then bounded authenticated status polling; exact release, source, manifest and target versions required |
+| `deploy` | 7 | `pipeline / deploy` | stage 6 released on `main`, `targets.deploy` not empty | config, release | `contents: read`, `id-token: write` | one admission request, then bounded authenticated status polling; exact release, source, manifest and target versions required |
 | `infra-apply` | 7 | `pipeline / infra-apply` | terraform, `push` to `main` | config, build | none | fails closed: not wired |
 
 For `ecosystem: terraform`, the first step of `lint-test` and `build-candidate` fails closed (no pinned OpenTofu; no
@@ -165,3 +165,5 @@ zizmor --offline --no-config pipeline/pipeline.yml pipeline/caller.yml
 
 The check-name test reads the authorizer policy from `../authorizer/policy/actions.json`, or from
 `AUTHORIZER_POLICY`, and skips with a message when neither is present. YAML is parsed with python3 and PyYAML.
+
+The build job requires a nonempty repository `attestation-id` from the pinned producer and exposes the attestation ID and URL as evidence. `create-storage-record: false` disables optional OCI registry metadata records; it does not disable GitHub repository attestation publication. Promotion consumes repository attestations through the Authorizer.

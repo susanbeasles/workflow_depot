@@ -61,7 +61,7 @@ config ─┬─ lint-test (1) ────────────────�
 | 5 | `shadow` | `actions/request-shadow` | `pull_request` into `main`, not a draft, not a fork | build | `id-token: write` | the authorizer builds the candidate on `shadow/pr-<n>` |
 | 5 | `promote` | `actions/request-promotion` | `push` to `shadow/pr-*` | build | `id-token: write` | the authorizer verifies the four checks and the attestation on the candidate; `main` fast-forwards to it, provenance tag |
 | 6 | `release` | `release.yml` | `push` to `main` or a `v*` tag, `targets.applicationManifest` set | config, build | `contents: write`, `id-token: write` | immutable `vX.Y.Z` from Conventional Commits; write-once GitHub Release with bundles, SBOMs, cosign and provenance bundles |
-| 7 | `deploy` | `actions/request-deploy/main.mjs` | stage 6 output `released == 'true'` on `main` and `targets.deploy` not empty | config, release | `id-token: write` | one admission, bounded authenticated terminal readback, exact source/release/manifest/target identity; failure, rollback or uncertainty fails the job |
+| 7 | `deploy` | `actions/request-deploy/main.mjs` | stage 6 output `released == 'true'` on `main` and `targets.deploy` not empty | config, release | `contents: read`, `id-token: write` | one admission, bounded authenticated terminal readback, exact source/release/manifest/target identity; failure, rollback or uncertainty fails the job |
 | 7 (terraform) | `infra-apply` | none | terraform, `push` to `main` | config, build | none | fails closed: not wired |
 
 Rules every job follows: `permissions: {}` at the top and the minimum per job; GitHub-hosted `ubuntu-24.04`;

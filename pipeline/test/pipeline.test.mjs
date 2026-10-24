@@ -125,7 +125,7 @@ test('every job: explicit minimal permissions; every runner job ubuntu-24.04 wit
     shadow: { 'id-token': 'write' },
     promote: { 'id-token': 'write' },
     release: { contents: 'write', 'id-token': 'write' },
-    deploy: { 'id-token': 'write' },
+    deploy: { contents: 'read', 'id-token': 'write' },
     'infra-apply': {},
   };
   for (const [job, def] of Object.entries(wf.jobs)) {
@@ -302,6 +302,22 @@ test('candidate builds without signing privileges; build hashes the immutable sa
  assert.equal(wf.on.workflow_call.inputs['require-attestation'],undefined);
 });
 
+test('build fails without a persisted repository attestation ID and exposes its evidence', () => {
+ const build=wf.jobs.build;
+ const attest=build.steps.find(s=>s.id==='attest');
+ assert.ok(attest.uses.startsWith('actions/attest@'));
+ const guard=build.steps.find(s=>s.name==='Require repository attestation publication');
+ assert.ok(build.steps.indexOf(guard)>build.steps.indexOf(attest));
+ assert.equal(guard.if,undefined);
+ assert.equal(guard['continue-on-error'],undefined);
+ assert.equal(guard.env.ATTESTATION_ID,'${{ steps.attest.outputs.attestation-id }}');
+ assert.equal(build.outputs.attestation_id,'${{ steps.attest.outputs.attestation-id }}');
+ assert.equal(build.outputs.attestation_url,'${{ steps.attest.outputs.attestation-url }}');
+ const run=id=>execFileSync('bash',['-euo','pipefail','-c',guard.run],{env:{ATTESTATION_ID:id},stdio:'pipe'});
+ assert.throws(()=>run(''));
+ run('123456');
+});
+
 test('every job that uses the working directory checks it right after checkout, before any step uses it', () => {
   for (const job of ['lint-test', 'quality', 'security', 'build-candidate']) {
     const steps = wf.jobs[job].steps;
@@ -319,7 +335,7 @@ test('stage 7 uses only the pinned depot client, exact release outputs and narro
   const deploy = wf.jobs.deploy;
   assert.equal(deploy.uses, undefined);
   assert.equal(deploy.secrets, undefined);
-  assert.deepEqual(deploy.permissions, { 'id-token': 'write' });
+  assert.deepEqual(deploy.permissions, { contents: 'read', 'id-token': 'write' });
   assert.equal(deploy.environment, '${{ needs.config.outputs.deploy_environment }}');
   assert.equal(deploy.steps.length, 3);
   assert.equal(deploy.steps[0].run, readFileSync(path.join(SCRIPTS, 'workflow-sha.cjs'), 'utf8'));
