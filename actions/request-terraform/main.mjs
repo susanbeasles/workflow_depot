@@ -25,12 +25,11 @@ export function requestFromEnvironment(env, payload = null) {
     requireThat(match, 'Terraform plans require a pull request merge ref');
     const number = Number(match[1]);
     requireThat(Number.isSafeInteger(number) && number > 0, 'invalid pull request number');
-    if (payload !== null) {
-      requireThat(payload?.number === number && payload?.pull_request?.number === number, 'event pull request mismatch');
-      requireThat(payload.pull_request.base?.ref === 'main', 'Terraform plan target is not main');
-      requireThat(payload.pull_request.base?.repo?.id === repo_id, 'Terraform plan base repository mismatch');
-      requireThat(payload.pull_request.head?.repo?.id === repo_id, 'cross-repository plans are forbidden');
-    }
+    requireThat(payload !== null && typeof payload === 'object' && !Array.isArray(payload), 'pull request event evidence is required');
+    requireThat(payload?.number === number && payload?.pull_request?.number === number, 'event pull request mismatch');
+    requireThat(payload.pull_request.base?.ref === 'main', 'Terraform plan target is not main');
+    requireThat(payload.pull_request.base?.repo?.id === repo_id, 'Terraform plan base repository mismatch');
+    requireThat(payload.pull_request.head?.repo?.id === repo_id, 'cross-repository plans are forbidden');
     return { action: owner.prefix + '.plan', subject: { pullRequest: number }, commit: env.GITHUB_SHA, stack: owner.stack, phase: 'plan' };
   }
   requireThat(env.GITHUB_EVENT_NAME === 'push' && env.GITHUB_REF === 'refs/heads/main',
