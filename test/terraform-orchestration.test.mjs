@@ -33,6 +33,7 @@ test('routes only the exact infra and infra-root repositories and GitHub event t
     {...env(), GITHUB_SHA: 'not-a-sha'},
   ]) assert.throws(() => requestFromEnvironment(malformed, pr()), ActionError);
   assert.throws(() => requestFromEnvironment(env(), { ...pr(), pull_request:{...pr().pull_request,head:{repo:{id:4}}}}), ActionError);
+  assert.throws(() => requestFromEnvironment(env(), null), ActionError);
   assert.throws(() => requestFromEnvironment({ ...env(), GITHUB_EVENT_NAME:'pull_request_target'}, pr()), ActionError);
 });
 
