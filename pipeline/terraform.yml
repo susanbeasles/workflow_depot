@@ -1,0 +1,70 @@
+# Staged reusable workflow: publish to .github/workflows/terraform.yml only
+# after the reviewed source SHA and Authorizer policy have been commissioned.
+# GitHub Actions is a credential-free transport, not the Terraform executor.
+name: Terraform infrastructure
+on:
+  workflow_call:
+    inputs:
+      depot_ref:
+        type: string
+        required: true
+        description: Immutable, reviewed workflow_depot commit SHA
+permissions: {}
+jobs:
+  terraform:
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Verify reusable workflow and immutable source
+        id: pin
+        shell: node {0}
+        env:
+          DEPOT_REF: \${{ inputs.depot_ref }}
+        run: |
+          'use strict';
+          const { appendFileSync } = require('node:fs');
+          const EXPECTED = 'susanbeasles/workflow_depot/.github/workflows/terraform.yml@';
+          const AUDIENCE = 'workflow-depot-source-resolution';
+          (async () => {
+            const sha = process.env.DEPOT_REF;
+            if (!/^[a-f0-9]{40}$/.test(sha || '')) throw Error('invalid source revision');
+            const endpoint = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
+            if (endpoint.protocol !== 'https:' || !endpoint.hostname.endsWith('.actions.githubusercontent.com')
+                || endpoint.username || endpoint.password || endpoint.port || !process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN)
+              throw Error('invalid GitHub OIDC endpoint');
+            endpoint.searchParams.set('audience', AUDIENCE);
+            const response = await fetch(endpoint, {
+              headers: { authorization: 'bearer ' + process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN },
+              redirect: 'error', signal: AbortSignal.timeout(15_000)
+            });
+            if (response.status !== 200) throw Error('OIDC unavailable');
+            const text = await response.text();
+            if (text.length > 32768) throw Error('OIDC response too large');
+            const jwt = JSON.parse(text).value;
+            if (typeof jwt !== 'string' || jwt.split('.').length !== 3) throw Error('OIDC response invalid');
+            const claims = JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString('utf8'));
+            if (claims.aud !== AUDIENCE || claims.iss !== 'https://token.actions.githubusercontent.com'
+                || claims.job_workflow_sha !== sha || claims.job_workflow_ref !== EXPECTED + sha
+                || claims.repository !== process.env.GITHUB_REPOSITORY
+                || claims.run_id !== process.env.GITHUB_RUN_ID
+                || claims.run_attempt !== process.env.GITHUB_RUN_ATTEMPT)
+              throw Error('reusable workflow identity mismatch');
+            appendFileSync(process.env.GITHUB_OUTPUT, 'sha=' + sha + '\n');
+          })().catch(() => {
+            // The token and remote response never enter CI logs.
+            console.error('::error title=terraform-source::Unable to bind this job to a reviewed immutable workflow revision.');
+            process.exitCode = 1;
+          });
+      - name: Checkout verified infrastructure request client
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: susanbeasles/workflow_depot
+          ref: \${{ steps.pin.outputs.sha }}
+          path: .workflow-depot
+          persist-credentials: false
+      - name: Request plan or apply with GitHub OIDC, then verify result
+        run: node .workflow-depot/actions/request-terraform/main.mjs
