@@ -9,6 +9,11 @@ on:
   push:
     branches: [main]
 permissions: {}
+# Keep an active main apply running; serialize later commits rather than cancelling
+# a job that may already be mutating infrastructure.
+concurrency:
+  group: terraform-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   terraform:
     uses: susanbeasles/workflow_depot/.github/workflows/terraform.yml@0000000000000000000000000000000000000000
