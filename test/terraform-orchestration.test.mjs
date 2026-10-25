@@ -12,6 +12,7 @@ const env = (repo = 'susanbeasles/infra', event = 'pull_request') => ({
   GITHUB_REPOSITORY: repo,
   GITHUB_REPOSITORY_ID: repo.endsWith('/infra') ? '1417590199' : '1419989558',
   GITHUB_EVENT_NAME: event,
+  GITHUB_REF_PROTECTED: event === 'push' ? 'true' : 'false',
   GITHUB_REF: event === 'pull_request' ? 'refs/pull/7/merge' : 'refs/heads/main',
   GITHUB_SHA: SHA,
   ACTIONS_ID_TOKEN_REQUEST_URL: 'https://example.actions.githubusercontent.com/oidc',
@@ -35,6 +36,10 @@ test('routes only the exact infra and infra-root repositories and GitHub event t
   assert.throws(() => requestFromEnvironment(env(), { ...pr(), pull_request:{...pr().pull_request,head:{repo:{id:4}}}}), ActionError);
   assert.throws(() => requestFromEnvironment(env(), null), ActionError);
   assert.throws(() => requestFromEnvironment({ ...env(), GITHUB_EVENT_NAME:'pull_request_target'}, pr()), ActionError);
+  for (const protection of [undefined, '', 'false', 'TRUE']) {
+    assert.throws(() => requestFromEnvironment({ ...env('susanbeasles/infra', 'push'), GITHUB_REF_PROTECTED: protection }), ActionError);
+    assert.throws(() => requestFromEnvironment({ ...env('susanbeasles/infra-root', 'push'), GITHUB_REF_PROTECTED: protection }), ActionError);
+  }
 });
 
 test('OIDC request plus runner status polling verifies exact Terraform plan result', async () => {
