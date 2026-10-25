@@ -34,6 +34,7 @@ export function requestFromEnvironment(env, payload = null) {
   }
   requireThat(env.GITHUB_EVENT_NAME === 'push' && env.GITHUB_REF === 'refs/heads/main',
     'Terraform apply requires a main push');
+  requireThat(env.GITHUB_REF_PROTECTED === 'true', 'Terraform apply requires a protected main ref');
   return { action: owner.prefix + '.apply', subject: {}, commit: env.GITHUB_SHA, stack: owner.stack, phase: 'apply' };
 }
 
