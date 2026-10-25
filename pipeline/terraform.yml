@@ -23,7 +23,7 @@ jobs:
         id: pin
         shell: node {0}
         env:
-          DEPOT_REF: \${{ inputs.depot_ref }}
+          DEPOT_REF: ${{ inputs.depot_ref }}
         run: |
           'use strict';
           const { appendFileSync } = require('node:fs');
@@ -63,7 +63,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: susanbeasles/workflow_depot
-          ref: \${{ steps.pin.outputs.sha }}
+          ref: ${{ steps.pin.outputs.sha }}
           path: .workflow-depot
           persist-credentials: false
       - name: Request plan or apply with GitHub OIDC, then verify result
