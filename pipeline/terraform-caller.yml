@@ -1,0 +1,19 @@
+# Staged caller: install as .github/workflows/terraform.yml in infra or infra-root.
+# The SHA must be the reviewed workflow_depot commit containing terraform.yml.
+# No Terraform or Cloudflare API credentials are put in GitHub Secrets.
+name: Terraform infrastructure
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+permissions: {}
+jobs:
+  terraform:
+    uses: susanbeasles/workflow_depot/.github/workflows/terraform.yml@0000000000000000000000000000000000000000
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      depot_ref: '0000000000000000000000000000000000000000'
